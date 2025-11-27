@@ -954,8 +954,13 @@ class DoRobotDataset(torch.utils.data.Dataset):
                 continue
             episode_buffer[key] = np.stack(episode_buffer[key])
 
-        self.stop_audio_writer()
-        self.wait_audio_writer()
+        # IMPORTANT: Only stop audio writer in synchronous mode (episode_data is None)
+        # When called from async worker (episode_data provided), the recording thread
+        # is still recording and using the shared audio_writer. Stopping it here would
+        # break audio recording for subsequent episodes.
+        if not episode_data:
+            self.stop_audio_writer()
+            self.wait_audio_writer()
 
         # Wait for THIS episode's images only (not all images in the queue)
         # This is critical for async save to work in parallel during recording

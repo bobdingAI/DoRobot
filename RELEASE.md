@@ -4,6 +4,86 @@ This document tracks all changes made to fix async episode saving issues.
 
 ---
 
+## V16 (2025-11-27) - Shared Resource & Timeout Fixes
+
+### Problem 1: Images not written for episodes after episode 0
+After V15 fix, no errors appeared but:
+- Episode 0 images exist (~1700 files)
+- Episodes 1-9 have directories but 0 images
+- `total_episodes: 0` - no saves completed
+- Missing `data/` and `videos/` folders
+
+### Root Cause 1
+`save_episode()` unconditionally calls `stop_audio_writer()` at line 957.
+When async worker processes episode 0's save on the SHARED dataset object,
+it stops the audio_writer while the recording thread is still recording
+episodes 1-9. This breaks the shared resource.
+
+### Problem 2: `wait_all_complete()` timeout doesn't work
+The timeout parameter was ineffective because `queue.join()` in Python
+has no timeout parameter - the check only happens AFTER join() returns.
+
+### Problem 3: Image write errors silently swallowed
+`write_image()` just prints errors without proper logging, making debugging difficult.
+
+### Changes
+
+**File: `operating_platform/dataset/dorobot_dataset.py`**
+
+1. Only stop audio writer in synchronous mode:
+```python
+# Line ~957-963
+# IMPORTANT: Only stop audio writer in synchronous mode (episode_data is None)
+# When called from async worker (episode_data provided), the recording thread
+# is still recording and using the shared audio_writer. Stopping it here would
+# break audio recording for subsequent episodes.
+if not episode_data:
+    self.stop_audio_writer()
+    self.wait_audio_writer()
+```
+
+**File: `operating_platform/core/async_episode_saver.py`**
+
+2. Fixed `wait_all_complete()` to use polling with actual timeout:
+```python
+# Line ~421-444
+if timeout:
+    # NOTE: queue.join() doesn't have a timeout parameter!
+    # We use polling instead to implement proper timeout behavior.
+    poll_interval = 0.5
+    while True:
+        with self._lock:
+            pending = len(self._pending_saves)
+            queue_size = self.save_queue.qsize()
+
+        if pending == 0 and queue_size == 0:
+            break
+
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            logging.warning(...)
+            return False
+
+        time.sleep(poll_interval)
+```
+
+**File: `operating_platform/dataset/image_writer.py`**
+
+3. Improved error logging in `write_image()`:
+```python
+# Line ~71-84
+def write_image(image: np.ndarray | PIL.Image.Image, fpath: Path):
+    import logging
+    try:
+        ...
+    except Exception as e:
+        # Log error with full traceback for debugging
+        import traceback
+        logging.error(f"[ImageWriter] Failed to write image {fpath}: {e}\n{traceback.format_exc()}")
+```
+
+---
+
 ## V15 (2025-11-27) - Race Condition Fix
 
 ### Problem
@@ -230,6 +310,9 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V13 | Assertion errors (file counts) | dorobot_dataset.py | Per-episode file checks |
 | V14 | Timeout for long recordings | dorobot_dataset.py | Dynamic timeout calculation |
 | V15 | Race condition (column mismatch) | record.py | Lock for atomic buffer swap |
+| V16 | Shared audio_writer stopped | dorobot_dataset.py | Only stop in sync mode |
+| V16 | `wait_all_complete()` timeout broken | async_episode_saver.py | Use polling with timeout |
+| V16 | Image write errors silent | image_writer.py | Proper logging |
 
 ---
 
@@ -240,13 +323,19 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V12 | 6 | 1 | 5 | Multiple error types |
 | V13 | 6 | 1 | 5 | Still old assertions |
 | V14 | 7 | 6 | 1 | Race condition on episode 5 |
-| V15 | TBD | TBD | TBD | Pending test |
+| V15 | 10 | 0 | 10 | No errors but no saves (shared resource issue) |
+| V16 | TBD | TBD | TBD | Pending test |
 
 ---
 
 ## Rollback Instructions
 
 To rollback to a specific version, revert the changes listed for that version and all subsequent versions.
+
+### Rollback V16 -> V15
+1. In `dorobot_dataset.py`, remove the `if not episode_data:` condition around `stop_audio_writer()`/`wait_audio_writer()`
+2. In `async_episode_saver.py`, restore `queue.join()` in `wait_all_complete()` instead of polling
+3. In `image_writer.py`, change `logging.error()` back to `print()`
 
 ### Rollback V15 -> V14
 Remove the `_buffer_lock` and associated `with self._buffer_lock:` blocks from `record.py`.

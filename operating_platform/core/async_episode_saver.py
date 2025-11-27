@@ -420,15 +420,28 @@ class AsyncEpisodeSaver:
 
         try:
             if timeout:
-                # Use queue.join() which blocks until all tasks are done
-                self.save_queue.join()
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
-                    logging.warning(
-                        "[AsyncEpisodeSaver] Timeout waiting for saves (%.1fs > %.1fs)",
-                        elapsed, timeout
-                    )
-                    return False
+                # NOTE: queue.join() doesn't have a timeout parameter!
+                # We use polling instead to implement proper timeout behavior.
+                poll_interval = 0.5
+                while True:
+                    # Check if all tasks are done
+                    with self._lock:
+                        pending = len(self._pending_saves)
+                        queue_size = self.save_queue.qsize()
+
+                    if pending == 0 and queue_size == 0:
+                        break
+
+                    elapsed = time.time() - start_time
+                    if elapsed > timeout:
+                        logging.warning(
+                            "[AsyncEpisodeSaver] Timeout waiting for saves after %.1fs "
+                            "(pending=%d, queue=%d)",
+                            elapsed, pending, queue_size
+                        )
+                        return False
+
+                    time.sleep(poll_interval)
             else:
                 self.save_queue.join()
 
