@@ -214,3 +214,6 @@ outputs/
 
 # Text files (notes, drafts)
 *.txt
+
+# Claude Code instructions (local only)
+CLAUDE.md
