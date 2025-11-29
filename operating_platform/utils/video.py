@@ -169,6 +169,68 @@ def decode_video_frames_torchvision(
     return closest_frames
 
 
+def _build_ffmpeg_cmd(
+    imgs_dir: Path,
+    video_path: Path,
+    fps: int,
+    vcodec: str,
+    pix_fmt: str = "yuv420p",
+    g: int | None = 1,
+    crf: int | None = 10,
+    fast_decode: int = 0,
+    log_level: Optional[str] = "error",
+    overwrite: bool = False,
+    # Ascend encoder specific parameters
+    device_id: int = 0,
+    channel_id: int = 0,
+    profile: int = 1,
+    rc_mode: int = 0,
+    max_bit_rate: int = 10000,
+    movement_scene: int = 0,
+) -> list[str]:
+    """Build ffmpeg command for video encoding."""
+    ffmpeg_args = OrderedDict(
+        [
+            ("-f", "image2"),
+            ("-r", str(fps)),
+            ("-i", str(imgs_dir / "frame_%06d.png")),
+            ("-vcodec", vcodec),
+            ("-pix_fmt", pix_fmt),
+        ]
+    )
+
+    if vcodec == "h264_ascend":
+        # Ascend encoder specific parameters
+        ffmpeg_args["-device_id"] = str(device_id)
+        ffmpeg_args["-channel_id"] = str(channel_id)
+        ffmpeg_args["-profile"] = str(profile)
+        ffmpeg_args["-rc_mode"] = str(rc_mode)
+        ffmpeg_args["-max_bit_rate"] = str(max_bit_rate)
+        ffmpeg_args["-movement_scene"] = str(movement_scene)
+        ffmpeg_args["-frame_rate"] = str(fps)
+        if g is not None:
+            ffmpeg_args["-gop"] = str(g)
+    else:
+        # Software encoder parameters
+        if g is not None:
+            ffmpeg_args["-g"] = str(g)
+        if crf is not None:
+            ffmpeg_args["-crf"] = str(crf)
+        if fast_decode:
+            key = "-svtav1-params" if vcodec == "libsvtav1" else "-tune"
+            value = f"fast-decode={fast_decode}" if vcodec == "libsvtav1" else "fastdecode"
+            ffmpeg_args[key] = value
+
+    if log_level is not None:
+        ffmpeg_args["-loglevel"] = str(log_level)
+
+    ffmpeg_args_list = [item for pair in ffmpeg_args.items() for item in pair]
+    if overwrite:
+        ffmpeg_args_list.append("-y")
+
+    return ["ffmpeg"] + ffmpeg_args_list + [str(video_path)]
+
+
 def encode_video_frames(
     imgs_dir: Path | str,
     video_path: Path | str,
@@ -180,108 +242,123 @@ def encode_video_frames(
     fast_decode: int = 0,
     log_level: Optional[str] = "error",
     overwrite: bool = False,
-    # Ascend 编码器特有参数
+    # Ascend encoder specific parameters
     device_id: int = 0,
     channel_id: int = 0,
     profile: int = 1,  # 0: baseline, 1: main, 2: high
     rc_mode: int = 0,  # 0: CBR, 1: VBR
-    max_bit_rate: int = 10000,  # 单位 kbps
+    max_bit_rate: int = 10000,  # kbps
     movement_scene: int = 0,  # 0: static, 1: movement
 ) -> None:
-    """More info on ffmpeg arguments tuning on `benchmark/video/README.md`"""
+    """
+    Encode image frames to video with automatic fallback.
 
-    # 确保编码器列表已加载
+    When h264_ascend (NPU) encoder fails (e.g., channel exhaustion),
+    automatically falls back to libx264 software encoder.
+
+    More info on ffmpeg arguments tuning on `benchmark/video/README.md`
+    """
     _ensure_encoders_loaded()
-
-    # 获取当前支持的编码器列表
     available_encoders = _AVAILABLE_ENCODERS
 
-    # 用户指定的编码器是否可用
-    if vcodec in available_encoders:
-        pass  # 正常使用指定的编码器
-    else:
-        # 从支持的两个编码器中选择一个可用的
-        supported_candidates = {"h264_ascend","libopenh264", "libx264"} & set(available_encoders)
-
+    # Determine encoder to use
+    if vcodec not in available_encoders:
+        supported_candidates = {"h264_ascend", "libopenh264", "libx264"} & set(available_encoders)
         if not supported_candidates:
             raise ValueError(
                 "None of the supported encoders are available. "
-                "Please ensure at least one of 'libopenh264' or 'libx264' is supported by your ffmpeg installation."
+                "Please ensure at least one of 'libopenh264' or 'libx264' is supported."
             )
+        # Prefer h264_ascend > libx264 > libopenh264
+        if "h264_ascend" in supported_candidates:
+            selected_vcodec = "h264_ascend"
+        elif "libx264" in supported_candidates:
+            selected_vcodec = "libx264"
+        else:
+            selected_vcodec = "libopenh264"
 
-        # 优先选择 libx264，否则选择 libopenh264
-        selected_vcodec = "h264_ascend" if "h264_ascend" in supported_candidates else "libopenh264"
-
-        # 发出警告
         warnings.warn(
             f"vcodec '{vcodec}' not available. Automatically switched to '{selected_vcodec}'.",
             UserWarning
         )
-
         vcodec = selected_vcodec
 
-    # 剩余逻辑不变（略去，与原函数一致）
     video_path = Path(video_path)
+    imgs_dir = Path(imgs_dir)
     video_path.parent.mkdir(parents=True, exist_ok=True)
 
-    ffmpeg_args = OrderedDict(
-        [
-            ("-f", "image2"),
-            ("-r", str(fps)),
-            ("-i", str(imgs_dir / "frame_%06d.png")),
-            ("-vcodec", vcodec),
-            ("-pix_fmt", pix_fmt),
-        ]
+    # Build ffmpeg command
+    ffmpeg_cmd = _build_ffmpeg_cmd(
+        imgs_dir=imgs_dir,
+        video_path=video_path,
+        fps=fps,
+        vcodec=vcodec,
+        pix_fmt=pix_fmt,
+        g=g,
+        crf=crf,
+        fast_decode=fast_decode,
+        log_level=log_level,
+        overwrite=overwrite,
+        device_id=device_id,
+        channel_id=channel_id,
+        profile=profile,
+        rc_mode=rc_mode,
+        max_bit_rate=max_bit_rate,
+        movement_scene=movement_scene,
     )
 
-    # 针对不同编码器使用不同的参数
-    if vcodec == "h264_ascend":
-        # Ascend 编码器特有参数
-        ffmpeg_args["-device_id"] = str(device_id)
-        ffmpeg_args["-channel_id"] = str(channel_id)
-        ffmpeg_args["-profile"] = str(profile)
-        ffmpeg_args["-rc_mode"] = str(rc_mode)
-        ffmpeg_args["-max_bit_rate"] = str(max_bit_rate)
-        ffmpeg_args["-movement_scene"] = str(movement_scene)
-        
-        # Ascend 编码器使用 frame_rate 参数而不是 -r
-        ffmpeg_args["-frame_rate"] = str(fps)
-        
-        # Ascend 编码器不支持 crf，但支持 gop
-        if g is not None:
-            ffmpeg_args["-gop"] = str(g)
-    else:
-        # 其他编码器的原有参数
-        if g is not None:
-            ffmpeg_args["-g"] = str(g)
+    logging.info(f"[VideoEncoder] Encoding video: {video_path.name} (encoder={vcodec})")
 
-        if crf is not None:
-            ffmpeg_args["-crf"] = str(crf)
+    try:
+        # Try encoding with selected encoder
+        subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL,
+                      capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        # Check if this is an Ascend NPU channel exhaustion error
+        is_npu_channel_error = (
+            vcodec == "h264_ascend" and
+            ("Failed to create venc channel" in str(e.stderr) or
+             "Error initializing output stream" in str(e.stderr) or
+             e.returncode != 0)
+        )
 
-        if fast_decode:
-            key = "-svtav1-params" if vcodec == "libsvtav1" else "-tune"
-            value = f"fast-decode={fast_decode}" if vcodec == "libsvtav1" else "fastdecode"
-            ffmpeg_args[key] = value
+        if is_npu_channel_error and "libx264" in available_encoders:
+            # Fallback to libx264 software encoder
+            logging.warning(
+                f"[VideoEncoder] NPU encoder failed for {video_path.name}, "
+                f"falling back to libx264 software encoder"
+            )
 
-    if log_level is not None:
-        ffmpeg_args["-loglevel"] = str(log_level)
+            # Build fallback command with libx264
+            fallback_cmd = _build_ffmpeg_cmd(
+                imgs_dir=imgs_dir,
+                video_path=video_path,
+                fps=fps,
+                vcodec="libx264",
+                pix_fmt=pix_fmt,
+                g=g,
+                crf=crf if crf is not None else 23,  # Default CRF for libx264
+                fast_decode=fast_decode,
+                log_level=log_level,
+                overwrite=overwrite,
+            )
 
-    ffmpeg_args = [item for pair in ffmpeg_args.items() for item in pair]
-    if overwrite:
-        ffmpeg_args.append("-y")
-
-    ffmpeg_cmd = ["ffmpeg"] + ffmpeg_args + [str(video_path)]
-
-    # Log encoding start
-    logging.info(f"[VideoEncoder] Encoding video: {video_path.name}")
-    
-    # redirect stdin to subprocess.DEVNULL to prevent reading random keyboard inputs from terminal
-    subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL)
+            try:
+                subprocess.run(fallback_cmd, check=True, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True)
+                logging.info(f"[VideoEncoder] Fallback encoding successful: {video_path.name}")
+            except subprocess.CalledProcessError as fallback_error:
+                logging.error(f"[VideoEncoder] Fallback also failed: {fallback_error.stderr}")
+                raise
+        else:
+            # Re-raise if not NPU error or no fallback available
+            logging.error(f"[VideoEncoder] Encoding failed: {e.stderr}")
+            raise
 
     if not video_path.exists():
         raise OSError(
             f"Video encoding did not work. File not found: {video_path}. "
-            f"Try running the command manually to debug: `{''.join(ffmpeg_cmd)}`"
+            f"Try running the command manually to debug: `{' '.join(ffmpeg_cmd)}`"
         )
 
 @dataclass
