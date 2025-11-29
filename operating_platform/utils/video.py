@@ -1,6 +1,8 @@
 import json
 import logging
 import subprocess
+import threading
+import time
 import warnings
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -13,6 +15,48 @@ import torch
 import torchvision
 from datasets.features.features import register_feature
 from PIL import Image
+
+
+# =============================================================================
+# NPU Encoder Resource Management
+# =============================================================================
+# Ascend 310B typically has 2-4 hardware encoding channels.
+# We use a semaphore to limit concurrent NPU encoding and prevent channel exhaustion.
+
+# Default NPU channel limit (Ascend 310B has ~2-4 channels)
+NPU_ENCODER_CHANNELS = 2
+
+# Semaphore to limit concurrent NPU encoding
+_npu_semaphore: Optional[threading.Semaphore] = None
+_npu_semaphore_lock = threading.Lock()
+
+
+def _get_npu_semaphore() -> threading.Semaphore:
+    """Get or create the NPU encoder semaphore (thread-safe lazy init)."""
+    global _npu_semaphore
+    if _npu_semaphore is None:
+        with _npu_semaphore_lock:
+            if _npu_semaphore is None:
+                _npu_semaphore = threading.Semaphore(NPU_ENCODER_CHANNELS)
+                logging.info(f"[VideoEncoder] Initialized NPU semaphore with {NPU_ENCODER_CHANNELS} channels")
+    return _npu_semaphore
+
+
+def set_npu_encoder_channels(num_channels: int) -> None:
+    """
+    Configure the number of NPU encoder channels available.
+
+    Call this before any encoding operations if your hardware has
+    a different number of channels than the default (2).
+
+    Args:
+        num_channels: Number of concurrent NPU encoding channels (typically 2-4)
+    """
+    global _npu_semaphore, NPU_ENCODER_CHANNELS
+    with _npu_semaphore_lock:
+        NPU_ENCODER_CHANNELS = num_channels
+        _npu_semaphore = threading.Semaphore(num_channels)
+        logging.info(f"[VideoEncoder] Set NPU encoder channels to {num_channels}")
 
 
 def get_available_encoders():
@@ -257,6 +301,58 @@ def _build_ffmpeg_cmd(
     return ["ffmpeg"] + ffmpeg_args_list + [str(video_path)]
 
 
+def _encode_with_cpu_fallback(
+    imgs_dir: Path,
+    video_path: Path,
+    fps: int,
+    pix_fmt: str,
+    fast_decode: int,
+) -> None:
+    """
+    Fallback to libx264 CPU encoder with progress output.
+
+    Uses ultrafast preset for speed on ARM CPUs.
+    """
+    frame_count = len(list(imgs_dir.glob("frame_*.png")))
+    logging.info(f"[VideoEncoder] Encoding {frame_count} frames with libx264 (preset=ultrafast)...")
+
+    fallback_cmd = _build_ffmpeg_cmd(
+        imgs_dir=imgs_dir,
+        video_path=video_path,
+        fps=fps,
+        vcodec="libx264",
+        pix_fmt=pix_fmt,
+        g=None,  # Default: keyframe every 2 seconds
+        crf=None,  # Default: 23 (balanced quality)
+        fast_decode=fast_decode,
+        log_level=None,
+        overwrite=True,
+        preset="ultrafast",
+        show_progress=True,
+    )
+
+    logging.info(f"[VideoEncoder] Running: {' '.join(fallback_cmd)}")
+
+    try:
+        subprocess.run(fallback_cmd, check=True, stdin=subprocess.DEVNULL)
+        logging.info(f"[VideoEncoder] CPU encoding successful: {video_path.name}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"[VideoEncoder] CPU encoding failed with return code: {e.returncode}")
+        raise
+
+
+def _is_npu_channel_error(stderr: str) -> bool:
+    """Check if the error is due to NPU channel exhaustion."""
+    error_indicators = [
+        "Failed to create venc channel",
+        "Error initializing output stream",
+        "venc channel",
+        "resource busy",
+    ]
+    stderr_lower = stderr.lower() if stderr else ""
+    return any(indicator.lower() in stderr_lower for indicator in error_indicators)
+
+
 def encode_video_frames(
     imgs_dir: Path | str,
     video_path: Path | str,
@@ -275,19 +371,42 @@ def encode_video_frames(
     rc_mode: int = 0,  # 0: CBR, 1: VBR
     max_bit_rate: int = 10000,  # kbps
     movement_scene: int = 0,  # 0: static, 1: movement
+    # Retry and fallback parameters
+    npu_retry_timeout: float = 30.0,  # Max time to wait for NPU channel (seconds)
+    npu_retry_interval: float = 1.0,  # Initial retry interval (seconds)
+    npu_retry_max_interval: float = 5.0,  # Max retry interval (seconds)
 ) -> None:
     """
-    Encode image frames to video with automatic fallback.
+    Encode image frames to video with NPU priority and automatic fallback.
 
-    When h264_ascend (NPU) encoder fails (e.g., channel exhaustion),
-    automatically falls back to libx264 software encoder.
+    Encoding Strategy:
+    1. Use semaphore to limit concurrent NPU encoding (prevents channel exhaustion)
+    2. If NPU fails, retry with exponential backoff (wait for channel to be freed)
+    3. After timeout, fallback to libx264 CPU encoder as last resort
 
-    libx264 fallback uses:
-    - preset=ultrafast for fast encoding on CPU
-    - crf=23 for good quality/size balance
-    - g=fps*2 for keyframe every 2 seconds
+    NPU encoding is much faster than CPU (~10-50x), so we prioritize waiting for
+    NPU availability over immediately falling back to slow CPU encoding.
 
-    More info on ffmpeg arguments tuning on `benchmark/video/README.md`
+    Args:
+        imgs_dir: Directory containing frame_XXXXXX.png images
+        video_path: Output video file path
+        fps: Frames per second
+        vcodec: Video codec (h264_ascend, libx264, libopenh264)
+        pix_fmt: Pixel format (default: yuv420p)
+        g: Keyframe interval (None = encoder default)
+        crf: Constant rate factor for quality (None = encoder default)
+        fast_decode: Enable fast decode optimization
+        log_level: FFmpeg log level
+        overwrite: Overwrite existing output file
+        device_id: Ascend device ID
+        channel_id: Ascend channel ID
+        profile: H.264 profile (0=baseline, 1=main, 2=high)
+        rc_mode: Rate control mode (0=CBR, 1=VBR)
+        max_bit_rate: Maximum bitrate in kbps
+        movement_scene: Scene type (0=static, 1=movement)
+        npu_retry_timeout: Maximum time to retry NPU encoding (seconds)
+        npu_retry_interval: Initial retry interval (seconds)
+        npu_retry_max_interval: Maximum retry interval (seconds)
     """
     _ensure_encoders_loaded()
     available_encoders = _AVAILABLE_ENCODERS
@@ -318,12 +437,37 @@ def encode_video_frames(
     imgs_dir = Path(imgs_dir)
     video_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build ffmpeg command
+    # For non-NPU encoders, encode directly without semaphore
+    if vcodec != "h264_ascend":
+        ffmpeg_cmd = _build_ffmpeg_cmd(
+            imgs_dir=imgs_dir,
+            video_path=video_path,
+            fps=fps,
+            vcodec=vcodec,
+            pix_fmt=pix_fmt,
+            g=g,
+            crf=crf,
+            fast_decode=fast_decode,
+            log_level=log_level,
+            overwrite=overwrite,
+        )
+        logging.info(f"[VideoEncoder] Encoding video: {video_path.name} (encoder={vcodec})")
+        subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL,
+                      capture_output=True, text=True)
+        if not video_path.exists():
+            raise OSError(f"Video encoding failed. File not found: {video_path}")
+        return
+
+    # === NPU Encoding with Semaphore and Retry ===
+    semaphore = _get_npu_semaphore()
+    has_cpu_fallback = "libx264" in available_encoders
+
+    # Build NPU ffmpeg command
     ffmpeg_cmd = _build_ffmpeg_cmd(
         imgs_dir=imgs_dir,
         video_path=video_path,
         fps=fps,
-        vcodec=vcodec,
+        vcodec="h264_ascend",
         pix_fmt=pix_fmt,
         g=g,
         crf=crf,
@@ -338,61 +482,94 @@ def encode_video_frames(
         movement_scene=movement_scene,
     )
 
-    logging.info(f"[VideoEncoder] Encoding video: {video_path.name} (encoder={vcodec})")
+    # Try to acquire semaphore (wait for NPU channel)
+    logging.info(f"[VideoEncoder] Waiting for NPU channel: {video_path.name}")
+    acquired = semaphore.acquire(timeout=npu_retry_timeout)
 
-    try:
-        # Try encoding with selected encoder
-        subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL,
-                      capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        # Check if this is an Ascend NPU channel exhaustion error
-        is_npu_channel_error = (
-            vcodec == "h264_ascend" and
-            ("Failed to create venc channel" in str(e.stderr) or
-             "Error initializing output stream" in str(e.stderr) or
-             e.returncode != 0)
+    if not acquired:
+        # Semaphore timeout - all channels busy for too long
+        logging.warning(
+            f"[VideoEncoder] NPU channels busy for {npu_retry_timeout}s, "
+            f"falling back to CPU: {video_path.name}"
         )
-
-        if is_npu_channel_error and "libx264" in available_encoders:
-            # Fallback to libx264 software encoder with progress output
-            logging.warning(
-                f"[VideoEncoder] NPU encoder failed for {video_path.name}, "
-                f"falling back to libx264 (CPU) encoder..."
+        if has_cpu_fallback:
+            _encode_with_cpu_fallback(imgs_dir, video_path, fps, pix_fmt, fast_decode)
+            return
+        else:
+            raise RuntimeError(
+                f"NPU channels busy and no CPU fallback available. "
+                f"Consider increasing npu_retry_timeout or reducing concurrent encoding."
             )
 
-            # Count frames for progress estimation
-            frame_count = len(list(imgs_dir.glob("frame_*.png")))
-            logging.info(f"[VideoEncoder] Encoding {frame_count} frames with libx264 (preset=ultrafast)...")
+    # Semaphore acquired - try NPU encoding with retry on failure
+    try:
+        start_time = time.time()
+        retry_interval = npu_retry_interval
+        attempt = 0
 
-            # Build fallback command with libx264 - use ultrafast preset and show progress
-            fallback_cmd = _build_ffmpeg_cmd(
-                imgs_dir=imgs_dir,
-                video_path=video_path,
-                fps=fps,
-                vcodec="libx264",
-                pix_fmt=pix_fmt,
-                g=None,  # Let _build_ffmpeg_cmd use default (fps*2)
-                crf=None,  # Let _build_ffmpeg_cmd use default (23)
-                fast_decode=fast_decode,
-                log_level=None,
-                overwrite=True,  # Overwrite any partial file from failed NPU attempt
-                preset="ultrafast",  # Fast CPU encoding
-                show_progress=True,  # Show ffmpeg progress
+        while True:
+            attempt += 1
+            elapsed = time.time() - start_time
+
+            logging.info(
+                f"[VideoEncoder] NPU encoding attempt {attempt}: {video_path.name}"
             )
-
-            logging.info(f"[VideoEncoder] Running: {' '.join(fallback_cmd)}")
 
             try:
-                # Run with progress visible (stderr not captured)
-                subprocess.run(fallback_cmd, check=True, stdin=subprocess.DEVNULL)
-                logging.info(f"[VideoEncoder] Fallback encoding successful: {video_path.name}")
-            except subprocess.CalledProcessError as fallback_error:
-                logging.error(f"[VideoEncoder] Fallback encoding failed with return code: {fallback_error.returncode}")
-                raise
-        else:
-            # Re-raise if not NPU error or no fallback available
-            logging.error(f"[VideoEncoder] Encoding failed: {e.stderr}")
-            raise
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    check=True,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                )
+                # Success!
+                logging.info(f"[VideoEncoder] NPU encoding successful: {video_path.name}")
+                break
+
+            except subprocess.CalledProcessError as e:
+                stderr = str(e.stderr) if e.stderr else ""
+
+                # Check if it's a channel exhaustion error (can retry)
+                if _is_npu_channel_error(stderr):
+                    remaining = npu_retry_timeout - elapsed
+
+                    if remaining <= 0:
+                        # Timeout reached
+                        logging.warning(
+                            f"[VideoEncoder] NPU retry timeout after {attempt} attempts, "
+                            f"falling back to CPU: {video_path.name}"
+                        )
+                        if has_cpu_fallback:
+                            _encode_with_cpu_fallback(
+                                imgs_dir, video_path, fps, pix_fmt, fast_decode
+                            )
+                            return
+                        else:
+                            raise RuntimeError(
+                                f"NPU encoding failed after {attempt} attempts "
+                                f"and no CPU fallback available."
+                            ) from e
+
+                    # Wait and retry
+                    wait_time = min(retry_interval, remaining)
+                    logging.info(
+                        f"[VideoEncoder] NPU channel busy, retrying in {wait_time:.1f}s "
+                        f"({remaining:.1f}s remaining): {video_path.name}"
+                    )
+                    time.sleep(wait_time)
+
+                    # Exponential backoff (capped)
+                    retry_interval = min(retry_interval * 1.5, npu_retry_max_interval)
+
+                else:
+                    # Non-recoverable error
+                    logging.error(f"[VideoEncoder] NPU encoding failed: {stderr}")
+                    raise
+
+    finally:
+        # Always release semaphore
+        semaphore.release()
 
     if not video_path.exists():
         raise OSError(
