@@ -4,6 +4,53 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## V24 (2025-11-29) - NPU Video Encoder Fallback
+
+### Summary
+Fixed video encoding failure on Ascend NPU when encoding many episodes due to hardware channel exhaustion.
+
+### Problem
+When collecting 10+ episodes, video encoding fails with:
+```
+Failed to create venc channel, ret is -1610055668
+Error initializing output stream 0:0
+```
+
+### Root Cause
+The Ascend NPU has limited video encoding channels (typically 2-4). When encoding multiple episodes simultaneously during async save, all channels become exhausted, causing `h264_ascend` encoder to fail.
+
+### Solution
+Added automatic fallback to `libx264` software encoder when NPU hardware encoder fails:
+1. Detect NPU channel exhaustion errors (exit code != 0, "Failed to create venc channel" in stderr)
+2. Automatically retry with `libx264` software encoder
+3. Log warning about fallback for debugging
+
+### Changes
+
+**File: `operating_platform/utils/video.py`**
+- Refactored `encode_video_frames()` to use helper function `_build_ffmpeg_cmd()`
+- Added try/except around ffmpeg subprocess call
+- Detect NPU errors: "Failed to create venc channel" or "Error initializing output stream"
+- Automatic fallback to `libx264` when NPU fails
+- Capture ffmpeg stderr for better error diagnostics
+
+```python
+try:
+    subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+except subprocess.CalledProcessError as e:
+    if vcodec == "h264_ascend" and "Failed to create venc channel" in str(e.stderr):
+        logging.warning(f"NPU encoder failed, falling back to libx264")
+        # Build and run fallback command with libx264
+        ...
+```
+
+### Impact
+- 10+ episode collections now complete successfully on Ascend NPU
+- Software fallback may be slower but ensures data is not lost
+- Users see warning log when fallback occurs
+
+---
+
 ## V23 (2025-11-28) - Unified Environment & UX Improvements
 
 ### Summary
@@ -485,6 +532,7 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V23 | Multiple camera windows | camera_display.py | Combined camera visualization |
 | V23 | Complex environment setup | scripts/setup_env.sh | Unified setup with device options |
 | V23 | No NPU support | pyproject.toml, manipulator.py | Ascend NPU integration |
+| V24 | NPU encoder channel exhaustion | video.py | Auto fallback to libx264 |
 
 ---
 
@@ -500,12 +548,18 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V17 | 10 | 10 | 0 | USB ports properly released |
 | V18-V22 | - | - | - | Incremental improvements |
 | V23 | 10 | 10 | 0 | Full workflow verified with unified launcher |
+| V24 | 10+ | TBD | TBD | NPU fallback to libx264 when channels exhausted |
 
 ---
 
 ## Rollback Instructions
 
 To rollback to a specific version, revert the changes listed for that version and all subsequent versions.
+
+### Rollback V24 -> V23
+1. In `video.py`, remove `_build_ffmpeg_cmd()` helper function
+2. In `video.py`, remove try/except fallback logic in `encode_video_frames()`
+3. Restore direct subprocess.run() call without capture_output
 
 ### Rollback V23 -> V22
 1. Remove `scripts/run_so101.sh` and `scripts/setup_env.sh`
