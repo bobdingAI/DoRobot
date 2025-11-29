@@ -4,6 +4,62 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## V25 (2025-11-29) - USB Port & ZeroMQ Socket Cleanup
+
+### Summary
+Fixed USB port and ZeroMQ socket resource leaks that caused video device numbers to increment after each data collection session.
+
+### Problem
+After completing data collection and starting a second round, video port numbers increase (e.g., `/dev/video0` becomes `/dev/video2`), indicating the USB camera ports were not properly released. Similarly, ttyACM* devices may remain locked.
+
+### Root Cause
+1. ZeroMQ sockets created at module import time were never closed
+2. No signal handlers for graceful cleanup on Ctrl+C or normal exit
+3. `disconnect()` didn't release ZeroMQ context and sockets
+
+### Solution
+
+**1. Lazy ZeroMQ Initialization (manipulator.py)**
+- Changed from module-level socket creation to lazy initialization
+- `_init_zmq()` called in `connect()` - sockets created only when needed
+- `_cleanup_zmq()` called in `disconnect()` - properly closes sockets and context
+
+**2. Signal Handlers (main.py)**
+- Added `signal.SIGINT` and `signal.SIGTERM` handlers
+- Added `atexit.register()` for cleanup on any exit path
+- Global `_daemon` reference for cleanup access
+- `cleanup_resources()` ensures daemon.stop() is called once
+
+**3. Improved Disconnect (manipulator.py)**
+- Thread join with timeout (prevents hanging)
+- ZeroMQ socket close with `linger=0` (immediate close)
+- Context termination
+- Clear received data buffers
+
+### Changes
+
+**File: `operating_platform/robot/robots/so101_v1/manipulator.py`**
+- Added `_init_zmq()` for lazy socket initialization
+- Added `_cleanup_zmq()` for proper socket/context cleanup
+- Updated `connect()` to call `_init_zmq()`
+- Updated `disconnect()` to call `_cleanup_zmq()` and clear buffers
+- Added null checks in receiver threads for socket availability
+
+**File: `operating_platform/core/main.py`**
+- Added `signal` and `atexit` imports
+- Added `cleanup_resources()` function
+- Added `signal_handler()` for SIGINT/SIGTERM
+- Register cleanup handlers in `main()`
+- Store daemon reference globally for cleanup access
+
+### Expected Behavior
+- Video ports remain consistent across collection sessions
+- No more `/dev/video0` -> `/dev/video2` jumps
+- Clean exit on Ctrl+C or 'e' key
+- ZeroMQ sockets properly released
+
+---
+
 ## V24 (2025-11-29) - NPU Video Encoder Fallback
 
 ### Summary
@@ -533,6 +589,7 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V23 | Complex environment setup | scripts/setup_env.sh | Unified setup with device options |
 | V23 | No NPU support | pyproject.toml, manipulator.py | Ascend NPU integration |
 | V24 | NPU encoder channel exhaustion | video.py | Auto fallback to libx264 |
+| V25 | USB port leak (video devices) | manipulator.py, main.py | Lazy ZMQ init + signal handlers |
 
 ---
 
@@ -549,12 +606,19 @@ def save_episode(self, episode_data: dict | None = None) -> int:
 | V18-V22 | - | - | - | Incremental improvements |
 | V23 | 10 | 10 | 0 | Full workflow verified with unified launcher |
 | V24 | 10+ | TBD | TBD | NPU fallback to libx264 when channels exhausted |
+| V25 | TBD | TBD | TBD | USB ports should remain consistent across sessions |
 
 ---
 
 ## Rollback Instructions
 
 To rollback to a specific version, revert the changes listed for that version and all subsequent versions.
+
+### Rollback V25 -> V24
+1. In `manipulator.py`, restore module-level ZMQ socket creation
+2. Remove `_init_zmq()` and `_cleanup_zmq()` functions
+3. In `main.py`, remove signal handlers and atexit registration
+4. Remove `cleanup_resources()` function
 
 ### Rollback V24 -> V23
 1. In `video.py`, remove `_build_ffmpeg_cmd()` helper function

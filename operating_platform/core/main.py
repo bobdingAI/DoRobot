@@ -1,6 +1,9 @@
 
+import atexit
 import cv2
 import json
+import logging
+import signal
 import time
 import draccus
 import socketio
@@ -356,14 +359,63 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         # Continue recording next episode (thread is still running, just save() reset the buffer)
 
 
+# Global reference for cleanup
+_daemon = None
+_cleanup_done = False
+
+
+def cleanup_resources():
+    """Clean up all resources on exit."""
+    global _daemon, _cleanup_done
+
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+
+    logging.info("[Cleanup] Releasing resources...")
+
+    # Close OpenCV windows
+    try:
+        cv2.destroyAllWindows()
+        logging.info("[Cleanup] OpenCV windows closed")
+    except Exception as e:
+        logging.warning(f"[Cleanup] Error closing OpenCV: {e}")
+
+    # Stop daemon (disconnects robot, releases USB ports)
+    if _daemon is not None:
+        try:
+            _daemon.stop()
+            logging.info("[Cleanup] Daemon stopped")
+        except Exception as e:
+            logging.warning(f"[Cleanup] Error stopping daemon: {e}")
+
+    logging.info("[Cleanup] Resources released")
+
+
+def signal_handler(signum, frame):
+    """Handle SIGINT/SIGTERM for graceful shutdown."""
+    sig_name = signal.Signals(signum).name
+    logging.info(f"[Signal] Received {sig_name}, cleaning up...")
+    cleanup_resources()
+    exit(0)
+
+
 @parser.wrap()
 def main(cfg: ControlPipelineConfig):
+    global _daemon
 
     init_logging(level=logging.INFO, force=True)
     git_branch_log()
     logging.info(pformat(asdict(cfg)))
 
+    # Register cleanup handlers
+    atexit.register(cleanup_resources)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     daemon = Daemon(fps=DEFAULT_FPS)
+    _daemon = daemon  # Store globally for cleanup
+
     daemon.start(cfg.robot)
     daemon.update()
 
@@ -372,14 +424,14 @@ def main(cfg: ControlPipelineConfig):
 
     try:
         # record_loop(cfg, daemon,video_encoder)
-        record_loop(cfg, daemon)     
+        record_loop(cfg, daemon)
     except KeyboardInterrupt:
-        print("coordinator and daemon stop")
-
+        logging.info("Recording interrupted by user")
+    except Exception as e:
+        logging.error(f"Error during recording: {e}")
+        traceback.print_exc()
     finally:
-        daemon.stop()
-        # video_encoder.stop()
-        cv2.destroyAllWindows()
+        cleanup_resources()
     
 
 if __name__ == "__main__":
