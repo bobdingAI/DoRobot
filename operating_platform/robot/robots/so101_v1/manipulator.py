@@ -42,15 +42,59 @@ running_recv_joint_server = True
 _image_connected = False
 _joint_connected = False
 
-zmq_context = zmq.Context()
+# ZeroMQ context and sockets (initialized lazily, cleaned up on disconnect)
+zmq_context = None
+socket_image = None
+socket_joint = None
+_zmq_initialized = False
 
-socket_image = zmq_context.socket(zmq.PAIR)
-socket_image.connect(ipc_address_image)
-socket_image.setsockopt(zmq.RCVTIMEO, 2000)
 
-socket_joint = zmq_context.socket(zmq.PAIR)
-socket_joint.connect(ipc_address_joint)
-socket_joint.setsockopt(zmq.RCVTIMEO, 2000)
+def _init_zmq():
+    """Initialize ZeroMQ sockets (lazy initialization)."""
+    global zmq_context, socket_image, socket_joint, _zmq_initialized
+
+    if _zmq_initialized:
+        return
+
+    zmq_context = zmq.Context()
+
+    socket_image = zmq_context.socket(zmq.PAIR)
+    socket_image.connect(ipc_address_image)
+    socket_image.setsockopt(zmq.RCVTIMEO, 2000)
+
+    socket_joint = zmq_context.socket(zmq.PAIR)
+    socket_joint.connect(ipc_address_joint)
+    socket_joint.setsockopt(zmq.RCVTIMEO, 2000)
+
+    _zmq_initialized = True
+    print("[SO101] ZeroMQ sockets initialized")
+
+
+def _cleanup_zmq():
+    """Clean up ZeroMQ sockets and context."""
+    global zmq_context, socket_image, socket_joint, _zmq_initialized
+    global _image_connected, _joint_connected
+
+    if not _zmq_initialized:
+        return
+
+    try:
+        if socket_image is not None:
+            socket_image.close(linger=0)
+            socket_image = None
+        if socket_joint is not None:
+            socket_joint.close(linger=0)
+            socket_joint = None
+        if zmq_context is not None:
+            zmq_context.term()
+            zmq_context = None
+
+        _zmq_initialized = False
+        _image_connected = False
+        _joint_connected = False
+        print("[SO101] ZeroMQ sockets cleaned up")
+    except Exception as e:
+        print(f"[SO101] Error cleaning up ZeroMQ: {e}")
 
 def so101_zmq_send(event_id, buffer, wait_time_s):
     buffer_bytes = buffer.tobytes()
@@ -68,6 +112,9 @@ def recv_image_server():
     """接收数据线程"""
     global _image_connected
     while running_recv_image_server:
+        if socket_image is None:
+            time.sleep(0.1)
+            continue
         try:
             message_parts = socket_image.recv_multipart()
             if len(message_parts) < 2:
@@ -123,6 +170,9 @@ def recv_joint_server():
     """接收数据线程"""
     global _joint_connected
     while running_recv_joint_server:
+        if socket_joint is None:
+            time.sleep(0.1)
+            continue
         try:
             message_parts = socket_joint.recv_multipart()
             if len(message_parts) < 2:
@@ -299,6 +349,9 @@ class SO101Manipulator:
         }
     
     def connect(self):
+        # Initialize ZeroMQ sockets (lazy initialization)
+        _init_zmq()
+
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
@@ -697,16 +750,33 @@ class SO101Manipulator:
                 "Aloha is not connected. You need to run `robot.connect()` before disconnecting."
             )
 
+        print("[SO101] Disconnecting robot...")
         self.is_connected = False
+
+        # Stop receiver threads
         global running_recv_image_server
         global running_recv_joint_server
         running_recv_image_server = False
         running_recv_joint_server = False
 
-        self.recv_image_thread.join()
-        self.recv_joint_thread.join()
-        
+        # Wait for threads to finish (with timeout)
+        if self.recv_image_thread.is_alive():
+            self.recv_image_thread.join(timeout=3.0)
+        if self.recv_joint_thread.is_alive():
+            self.recv_joint_thread.join(timeout=3.0)
+
+        # Clean up ZeroMQ sockets
+        _cleanup_zmq()
+
+        # Clear received data
+        recv_images.clear()
+        recv_joint.clear()
+
+        print("[SO101] Robot disconnected")
 
     def __del__(self):
         if getattr(self, "is_connected", False):
-            self.disconnect()
+            try:
+                self.disconnect()
+            except Exception as e:
+                print(f"[SO101] Error during cleanup: {e}")
