@@ -323,6 +323,13 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 # Voice prompt: end collection
                 log_say("End collection. Please wait for video encoding.", play_sounds=True)
 
+                # Close camera display window FIRST to release video resources
+                logging.info("Closing camera display...")
+                camera_display.close()
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)  # Process any pending window events
+                logging.info("Camera display closed")
+
                 # IMPORTANT: Stop the DORA daemon FIRST to disconnect hardware gracefully
                 # This prevents hardware disconnection errors during save operations
                 logging.info("Stopping DORA daemon (disconnecting hardware)...")
