@@ -280,10 +280,18 @@ class DoRobotDatasetMetadata:
         episode_length: int,
         episode_tasks: list[str],
         episode_stats: dict[str, dict],
+        skip_encoding: bool = False,
     ) -> None:
         """
         Save episode metadata to disk.
         Thread-safe via _meta_lock for async save compatibility.
+
+        Args:
+            episode_index: The episode index
+            episode_length: Number of frames in this episode
+            episode_tasks: List of task descriptions for this episode
+            episode_stats: Statistics for this episode
+            skip_encoding: If True, skip video info update (cloud offload mode)
         """
         with self._meta_lock:
             self.info["total_episodes"] += 1
@@ -294,9 +302,11 @@ class DoRobotDatasetMetadata:
                 self.info["total_chunks"] += 1
 
             self.info["splits"] = {"train": f"0:{self.info['total_episodes']}"}
-            self.info["total_videos"] += len(self.video_keys)
-            if len(self.video_keys) > 0:
-                self.update_video_info()
+            # Only count videos and update video info if encoding was done
+            if not skip_encoding:
+                self.info["total_videos"] += len(self.video_keys)
+                if len(self.video_keys) > 0:
+                    self.update_video_info()
 
             write_info(self.info, self.root)
 
@@ -995,7 +1005,8 @@ class DoRobotDataset(torch.utils.data.Dataset):
             logging.info(f"[Dataset] Skipping video encoding for episode {episode_index} (cloud offload mode)")
 
         # `meta.save_episode` be executed after encoding the videos
-        self.meta.save_episode(episode_index, episode_length, episode_tasks, ep_stats)
+        # Pass skip_encoding to avoid calling update_video_info() when videos weren't created
+        self.meta.save_episode(episode_index, episode_length, episode_tasks, ep_stats, skip_encoding=skip_encoding)
 
         ep_data_index = get_episode_data_index(self.meta.episodes, [episode_index])
         ep_data_index_np = {k: t.numpy() for k, t in ep_data_index.items()}
