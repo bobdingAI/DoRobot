@@ -1,6 +1,8 @@
 import json
 import logging
 import subprocess
+import threading
+import time
 import warnings
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -13,6 +15,48 @@ import torch
 import torchvision
 from datasets.features.features import register_feature
 from PIL import Image
+
+
+# =============================================================================
+# NPU Encoder Resource Management
+# =============================================================================
+# Ascend 310B typically has 2-4 hardware encoding channels.
+# We use a semaphore to limit concurrent NPU encoding and prevent channel exhaustion.
+
+# Default NPU channel limit (Ascend 310B has ~2-4 channels)
+NPU_ENCODER_CHANNELS = 2
+
+# Semaphore to limit concurrent NPU encoding
+_npu_semaphore: Optional[threading.Semaphore] = None
+_npu_semaphore_lock = threading.Lock()
+
+
+def _get_npu_semaphore() -> threading.Semaphore:
+    """Get or create the NPU encoder semaphore (thread-safe lazy init)."""
+    global _npu_semaphore
+    if _npu_semaphore is None:
+        with _npu_semaphore_lock:
+            if _npu_semaphore is None:
+                _npu_semaphore = threading.Semaphore(NPU_ENCODER_CHANNELS)
+                logging.info(f"[VideoEncoder] Initialized NPU semaphore with {NPU_ENCODER_CHANNELS} channels")
+    return _npu_semaphore
+
+
+def set_npu_encoder_channels(num_channels: int) -> None:
+    """
+    Configure the number of NPU encoder channels available.
+
+    Call this before any encoding operations if your hardware has
+    a different number of channels than the default (2).
+
+    Args:
+        num_channels: Number of concurrent NPU encoding channels (typically 2-4)
+    """
+    global _npu_semaphore, NPU_ENCODER_CHANNELS
+    with _npu_semaphore_lock:
+        NPU_ENCODER_CHANNELS = num_channels
+        _npu_semaphore = threading.Semaphore(num_channels)
+        logging.info(f"[VideoEncoder] Set NPU encoder channels to {num_channels}")
 
 
 def get_available_encoders():
@@ -169,61 +213,30 @@ def decode_video_frames_torchvision(
     return closest_frames
 
 
-def encode_video_frames(
-    imgs_dir: Path | str,
-    video_path: Path | str,
+def _build_ffmpeg_cmd(
+    imgs_dir: Path,
+    video_path: Path,
     fps: int,
-    vcodec: Literal["h264_ascend","libopenh264", "libx264"] = "h264_ascend",
+    vcodec: str,
     pix_fmt: str = "yuv420p",
-    g: int | None = 1,
-    crf: int | None = 10,
+    g: int | None = None,
+    crf: int | None = None,
     fast_decode: int = 0,
     log_level: Optional[str] = "error",
     overwrite: bool = False,
-    # Ascend 编码器特有参数
+    # libx264 specific parameters
+    preset: str = "ultrafast",
+    # Ascend encoder specific parameters
     device_id: int = 0,
     channel_id: int = 0,
-    profile: int = 1,  # 0: baseline, 1: main, 2: high
-    rc_mode: int = 0,  # 0: CBR, 1: VBR
-    max_bit_rate: int = 10000,  # 单位 kbps
-    movement_scene: int = 0,  # 0: static, 1: movement
-) -> None:
-    """More info on ffmpeg arguments tuning on `benchmark/video/README.md`"""
-
-    # 确保编码器列表已加载
-    _ensure_encoders_loaded()
-
-    # 获取当前支持的编码器列表
-    available_encoders = _AVAILABLE_ENCODERS
-
-    # 用户指定的编码器是否可用
-    if vcodec in available_encoders:
-        pass  # 正常使用指定的编码器
-    else:
-        # 从支持的两个编码器中选择一个可用的
-        supported_candidates = {"h264_ascend","libopenh264", "libx264"} & set(available_encoders)
-
-        if not supported_candidates:
-            raise ValueError(
-                "None of the supported encoders are available. "
-                "Please ensure at least one of 'libopenh264' or 'libx264' is supported by your ffmpeg installation."
-            )
-
-        # 优先选择 libx264，否则选择 libopenh264
-        selected_vcodec = "h264_ascend" if "h264_ascend" in supported_candidates else "libopenh264"
-
-        # 发出警告
-        warnings.warn(
-            f"vcodec '{vcodec}' not available. Automatically switched to '{selected_vcodec}'.",
-            UserWarning
-        )
-
-        vcodec = selected_vcodec
-
-    # 剩余逻辑不变（略去，与原函数一致）
-    video_path = Path(video_path)
-    video_path.parent.mkdir(parents=True, exist_ok=True)
-
+    profile: int = 1,
+    rc_mode: int = 0,
+    max_bit_rate: int = 10000,
+    movement_scene: int = 0,
+    # Progress output
+    show_progress: bool = False,
+) -> list[str]:
+    """Build ffmpeg command for video encoding."""
     ffmpeg_args = OrderedDict(
         [
             ("-f", "image2"),
@@ -234,54 +247,334 @@ def encode_video_frames(
         ]
     )
 
-    # 针对不同编码器使用不同的参数
     if vcodec == "h264_ascend":
-        # Ascend 编码器特有参数
+        # Ascend encoder specific parameters
         ffmpeg_args["-device_id"] = str(device_id)
         ffmpeg_args["-channel_id"] = str(channel_id)
         ffmpeg_args["-profile"] = str(profile)
         ffmpeg_args["-rc_mode"] = str(rc_mode)
         ffmpeg_args["-max_bit_rate"] = str(max_bit_rate)
         ffmpeg_args["-movement_scene"] = str(movement_scene)
-        
-        # Ascend 编码器使用 frame_rate 参数而不是 -r
         ffmpeg_args["-frame_rate"] = str(fps)
-        
-        # Ascend 编码器不支持 crf，但支持 gop
         if g is not None:
             ffmpeg_args["-gop"] = str(g)
-    else:
-        # 其他编码器的原有参数
+    elif vcodec == "libx264":
+        # libx264 specific parameters for fast encoding
+        ffmpeg_args["-preset"] = preset
         if g is not None:
             ffmpeg_args["-g"] = str(g)
-
+        else:
+            ffmpeg_args["-g"] = str(fps * 2)  # Default: keyframe every 2 seconds
         if crf is not None:
             ffmpeg_args["-crf"] = str(crf)
-
+        else:
+            ffmpeg_args["-crf"] = "23"  # Default CRF for libx264 (good quality/size balance)
+        if fast_decode:
+            ffmpeg_args["-tune"] = "fastdecode"
+    else:
+        # Other software encoders (libopenh264, etc.)
+        if g is not None:
+            ffmpeg_args["-g"] = str(g)
+        if crf is not None:
+            ffmpeg_args["-crf"] = str(crf)
         if fast_decode:
             key = "-svtav1-params" if vcodec == "libsvtav1" else "-tune"
             value = f"fast-decode={fast_decode}" if vcodec == "libsvtav1" else "fastdecode"
             ffmpeg_args[key] = value
 
-    if log_level is not None:
+    if log_level is not None and not show_progress:
         ffmpeg_args["-loglevel"] = str(log_level)
+    elif show_progress:
+        # Show progress info
+        ffmpeg_args["-loglevel"] = "info"
+        ffmpeg_args["-stats"] = ""
 
-    ffmpeg_args = [item for pair in ffmpeg_args.items() for item in pair]
+    ffmpeg_args_list = []
+    for key, value in ffmpeg_args.items():
+        ffmpeg_args_list.append(key)
+        if value:  # Skip empty values (like -stats which has no value)
+            ffmpeg_args_list.append(value)
+
     if overwrite:
-        ffmpeg_args.append("-y")
+        ffmpeg_args_list.append("-y")
 
-    ffmpeg_cmd = ["ffmpeg"] + ffmpeg_args + [str(video_path)]
+    return ["ffmpeg"] + ffmpeg_args_list + [str(video_path)]
 
-    # Log encoding start
-    logging.info(f"[VideoEncoder] Encoding video: {video_path.name}")
-    
-    # redirect stdin to subprocess.DEVNULL to prevent reading random keyboard inputs from terminal
-    subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL)
+
+def _encode_with_cpu_fallback(
+    imgs_dir: Path,
+    video_path: Path,
+    fps: int,
+    pix_fmt: str,
+    fast_decode: int,
+) -> None:
+    """
+    Fallback to libx264 CPU encoder with progress output.
+
+    Uses ultrafast preset for speed on ARM CPUs.
+    """
+    frame_count = len(list(imgs_dir.glob("frame_*.png")))
+    logging.info(f"[VideoEncoder] Encoding {frame_count} frames with libx264 (preset=ultrafast)...")
+
+    fallback_cmd = _build_ffmpeg_cmd(
+        imgs_dir=imgs_dir,
+        video_path=video_path,
+        fps=fps,
+        vcodec="libx264",
+        pix_fmt=pix_fmt,
+        g=None,  # Default: keyframe every 2 seconds
+        crf=None,  # Default: 23 (balanced quality)
+        fast_decode=fast_decode,
+        log_level=None,
+        overwrite=True,
+        preset="ultrafast",
+        show_progress=True,
+    )
+
+    logging.info(f"[VideoEncoder] Running: {' '.join(fallback_cmd)}")
+
+    try:
+        subprocess.run(fallback_cmd, check=True, stdin=subprocess.DEVNULL)
+        logging.info(f"[VideoEncoder] CPU encoding successful: {video_path.name}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"[VideoEncoder] CPU encoding failed with return code: {e.returncode}")
+        raise
+
+
+def _is_npu_channel_error(stderr: str) -> bool:
+    """Check if the error is due to NPU channel exhaustion."""
+    error_indicators = [
+        "Failed to create venc channel",
+        "Error initializing output stream",
+        "venc channel",
+        "resource busy",
+    ]
+    stderr_lower = stderr.lower() if stderr else ""
+    return any(indicator.lower() in stderr_lower for indicator in error_indicators)
+
+
+def encode_video_frames(
+    imgs_dir: Path | str,
+    video_path: Path | str,
+    fps: int,
+    vcodec: Literal["h264_ascend", "libopenh264", "libx264"] = "h264_ascend",
+    pix_fmt: str = "yuv420p",
+    g: int | None = None,
+    crf: int | None = None,
+    fast_decode: int = 0,
+    log_level: Optional[str] = "error",
+    overwrite: bool = False,
+    # Ascend encoder specific parameters
+    device_id: int = 0,
+    channel_id: int = 0,
+    profile: int = 1,  # 0: baseline, 1: main, 2: high
+    rc_mode: int = 0,  # 0: CBR, 1: VBR
+    max_bit_rate: int = 10000,  # kbps
+    movement_scene: int = 0,  # 0: static, 1: movement
+    # Retry and fallback parameters
+    npu_retry_timeout: float = 30.0,  # Max time to wait for NPU channel (seconds)
+    npu_retry_interval: float = 1.0,  # Initial retry interval (seconds)
+    npu_retry_max_interval: float = 5.0,  # Max retry interval (seconds)
+) -> None:
+    """
+    Encode image frames to video with NPU priority and automatic fallback.
+
+    Encoding Strategy:
+    1. Use semaphore to limit concurrent NPU encoding (prevents channel exhaustion)
+    2. If NPU fails, retry with exponential backoff (wait for channel to be freed)
+    3. After timeout, fallback to libx264 CPU encoder as last resort
+
+    NPU encoding is much faster than CPU (~10-50x), so we prioritize waiting for
+    NPU availability over immediately falling back to slow CPU encoding.
+
+    Args:
+        imgs_dir: Directory containing frame_XXXXXX.png images
+        video_path: Output video file path
+        fps: Frames per second
+        vcodec: Video codec (h264_ascend, libx264, libopenh264)
+        pix_fmt: Pixel format (default: yuv420p)
+        g: Keyframe interval (None = encoder default)
+        crf: Constant rate factor for quality (None = encoder default)
+        fast_decode: Enable fast decode optimization
+        log_level: FFmpeg log level
+        overwrite: Overwrite existing output file
+        device_id: Ascend device ID
+        channel_id: Ascend channel ID
+        profile: H.264 profile (0=baseline, 1=main, 2=high)
+        rc_mode: Rate control mode (0=CBR, 1=VBR)
+        max_bit_rate: Maximum bitrate in kbps
+        movement_scene: Scene type (0=static, 1=movement)
+        npu_retry_timeout: Maximum time to retry NPU encoding (seconds)
+        npu_retry_interval: Initial retry interval (seconds)
+        npu_retry_max_interval: Maximum retry interval (seconds)
+    """
+    _ensure_encoders_loaded()
+    available_encoders = _AVAILABLE_ENCODERS
+
+    # Determine encoder to use
+    if vcodec not in available_encoders:
+        supported_candidates = {"h264_ascend", "libopenh264", "libx264"} & set(available_encoders)
+        if not supported_candidates:
+            raise ValueError(
+                "None of the supported encoders are available. "
+                "Please ensure at least one of 'libopenh264' or 'libx264' is supported."
+            )
+        # Prefer h264_ascend > libx264 > libopenh264
+        if "h264_ascend" in supported_candidates:
+            selected_vcodec = "h264_ascend"
+        elif "libx264" in supported_candidates:
+            selected_vcodec = "libx264"
+        else:
+            selected_vcodec = "libopenh264"
+
+        warnings.warn(
+            f"vcodec '{vcodec}' not available. Automatically switched to '{selected_vcodec}'.",
+            UserWarning
+        )
+        vcodec = selected_vcodec
+
+    video_path = Path(video_path)
+    imgs_dir = Path(imgs_dir)
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # For non-NPU encoders, encode directly without semaphore
+    if vcodec != "h264_ascend":
+        ffmpeg_cmd = _build_ffmpeg_cmd(
+            imgs_dir=imgs_dir,
+            video_path=video_path,
+            fps=fps,
+            vcodec=vcodec,
+            pix_fmt=pix_fmt,
+            g=g,
+            crf=crf,
+            fast_decode=fast_decode,
+            log_level=log_level,
+            overwrite=overwrite,
+        )
+        logging.info(f"[VideoEncoder] Encoding video: {video_path.name} (encoder={vcodec})")
+        subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL,
+                      capture_output=True, text=True)
+        if not video_path.exists():
+            raise OSError(f"Video encoding failed. File not found: {video_path}")
+        return
+
+    # === NPU Encoding with Semaphore and Retry ===
+    semaphore = _get_npu_semaphore()
+    has_cpu_fallback = "libx264" in available_encoders
+
+    # Build NPU ffmpeg command
+    ffmpeg_cmd = _build_ffmpeg_cmd(
+        imgs_dir=imgs_dir,
+        video_path=video_path,
+        fps=fps,
+        vcodec="h264_ascend",
+        pix_fmt=pix_fmt,
+        g=g,
+        crf=crf,
+        fast_decode=fast_decode,
+        log_level=log_level,
+        overwrite=overwrite,
+        device_id=device_id,
+        channel_id=channel_id,
+        profile=profile,
+        rc_mode=rc_mode,
+        max_bit_rate=max_bit_rate,
+        movement_scene=movement_scene,
+    )
+
+    # Try to acquire semaphore (wait for NPU channel)
+    logging.info(f"[VideoEncoder] Waiting for NPU channel: {video_path.name}")
+    acquired = semaphore.acquire(timeout=npu_retry_timeout)
+
+    if not acquired:
+        # Semaphore timeout - all channels busy for too long
+        logging.warning(
+            f"[VideoEncoder] NPU channels busy for {npu_retry_timeout}s, "
+            f"falling back to CPU: {video_path.name}"
+        )
+        if has_cpu_fallback:
+            _encode_with_cpu_fallback(imgs_dir, video_path, fps, pix_fmt, fast_decode)
+            return
+        else:
+            raise RuntimeError(
+                f"NPU channels busy and no CPU fallback available. "
+                f"Consider increasing npu_retry_timeout or reducing concurrent encoding."
+            )
+
+    # Semaphore acquired - try NPU encoding with retry on failure
+    try:
+        start_time = time.time()
+        retry_interval = npu_retry_interval
+        attempt = 0
+
+        while True:
+            attempt += 1
+            elapsed = time.time() - start_time
+
+            logging.info(
+                f"[VideoEncoder] NPU encoding attempt {attempt}: {video_path.name}"
+            )
+
+            try:
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    check=True,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                )
+                # Success!
+                logging.info(f"[VideoEncoder] NPU encoding successful: {video_path.name}")
+                break
+
+            except subprocess.CalledProcessError as e:
+                stderr = str(e.stderr) if e.stderr else ""
+
+                # Check if it's a channel exhaustion error (can retry)
+                if _is_npu_channel_error(stderr):
+                    remaining = npu_retry_timeout - elapsed
+
+                    if remaining <= 0:
+                        # Timeout reached
+                        logging.warning(
+                            f"[VideoEncoder] NPU retry timeout after {attempt} attempts, "
+                            f"falling back to CPU: {video_path.name}"
+                        )
+                        if has_cpu_fallback:
+                            _encode_with_cpu_fallback(
+                                imgs_dir, video_path, fps, pix_fmt, fast_decode
+                            )
+                            return
+                        else:
+                            raise RuntimeError(
+                                f"NPU encoding failed after {attempt} attempts "
+                                f"and no CPU fallback available."
+                            ) from e
+
+                    # Wait and retry
+                    wait_time = min(retry_interval, remaining)
+                    logging.info(
+                        f"[VideoEncoder] NPU channel busy, retrying in {wait_time:.1f}s "
+                        f"({remaining:.1f}s remaining): {video_path.name}"
+                    )
+                    time.sleep(wait_time)
+
+                    # Exponential backoff (capped)
+                    retry_interval = min(retry_interval * 1.5, npu_retry_max_interval)
+
+                else:
+                    # Non-recoverable error
+                    logging.error(f"[VideoEncoder] NPU encoding failed: {stderr}")
+                    raise
+
+    finally:
+        # Always release semaphore
+        semaphore.release()
 
     if not video_path.exists():
         raise OSError(
             f"Video encoding did not work. File not found: {video_path}. "
-            f"Try running the command manually to debug: `{''.join(ffmpeg_cmd)}`"
+            f"Try running the command manually to debug: `{' '.join(ffmpeg_cmd)}`"
         )
 
 @dataclass
