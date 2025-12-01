@@ -38,15 +38,63 @@ lock = threading.Lock()  # 线程锁
 running_recv_image_server = True
 running_recv_joint_server = True
 
-zmq_context = zmq.Context()
+# Connection state tracking
+_image_connected = False
+_joint_connected = False
 
-socket_image = zmq_context.socket(zmq.PAIR)
-socket_image.connect(ipc_address_image)
-socket_image.setsockopt(zmq.RCVTIMEO, 2000)
+# ZeroMQ context and sockets (initialized lazily, cleaned up on disconnect)
+zmq_context = None
+socket_image = None
+socket_joint = None
+_zmq_initialized = False
 
-socket_joint = zmq_context.socket(zmq.PAIR)
-socket_joint.connect(ipc_address_joint)
-socket_joint.setsockopt(zmq.RCVTIMEO, 2000)
+
+def _init_zmq():
+    """Initialize ZeroMQ sockets (lazy initialization)."""
+    global zmq_context, socket_image, socket_joint, _zmq_initialized
+
+    if _zmq_initialized:
+        return
+
+    zmq_context = zmq.Context()
+
+    socket_image = zmq_context.socket(zmq.PAIR)
+    socket_image.connect(ipc_address_image)
+    socket_image.setsockopt(zmq.RCVTIMEO, 2000)
+
+    socket_joint = zmq_context.socket(zmq.PAIR)
+    socket_joint.connect(ipc_address_joint)
+    socket_joint.setsockopt(zmq.RCVTIMEO, 2000)
+
+    _zmq_initialized = True
+    print("[SO101] ZeroMQ sockets initialized")
+
+
+def _cleanup_zmq():
+    """Clean up ZeroMQ sockets and context."""
+    global zmq_context, socket_image, socket_joint, _zmq_initialized
+    global _image_connected, _joint_connected
+
+    if not _zmq_initialized:
+        return
+
+    try:
+        if socket_image is not None:
+            socket_image.close(linger=0)
+            socket_image = None
+        if socket_joint is not None:
+            socket_joint.close(linger=0)
+            socket_joint = None
+        if zmq_context is not None:
+            zmq_context.term()
+            zmq_context = None
+
+        _zmq_initialized = False
+        _image_connected = False
+        _joint_connected = False
+        print("[SO101] ZeroMQ sockets cleaned up")
+    except Exception as e:
+        print(f"[SO101] Error cleaning up ZeroMQ: {e}")
 
 def so101_zmq_send(event_id, buffer, wait_time_s):
     buffer_bytes = buffer.tobytes()
@@ -62,7 +110,11 @@ def so101_zmq_send(event_id, buffer, wait_time_s):
 
 def recv_image_server():
     """接收数据线程"""
+    global _image_connected
     while running_recv_image_server:
+        if socket_image is None:
+            time.sleep(0.1)
+            continue
         try:
             message_parts = socket_image.recv_multipart()
             if len(message_parts) < 2:
@@ -72,9 +124,11 @@ def recv_image_server():
             buffer_bytes = message_parts[1]
             metadata = json.loads(message_parts[2].decode('utf-8'))
 
-            # print(f"Received event_id = {event_id}")
-            # print(f"len(message_parts) = {len(message_parts)}")
-            
+            # Mark as connected on first successful receive
+            if not _image_connected:
+                _image_connected = True
+                print("[SO101] Camera data stream connected")
+
             if 'image' in event_id:
                 # 解码图像
                 img_array = np.frombuffer(buffer_bytes, dtype=np.uint8)
@@ -96,25 +150,29 @@ def recv_image_server():
                 elif encoding in ["jpeg", "jpg", "jpe", "bmp", "webp", "png"]:
                     channels = 3
                     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                
+
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
+
                 if frame is not None:
                     with lock:
                         # print(f"Received event_id = {event_id}")
                         recv_images[event_id] = frame
 
         except zmq.Again:
-            print(f"SO101 Image Received Timeout")
+            # Timeout waiting for data, silently continue
             continue
         except Exception as e:
-            print("recv image error:", e)
+            print("[SO101] recv image error:", e)
             break
 
 
 def recv_joint_server():
     """接收数据线程"""
+    global _joint_connected
     while running_recv_joint_server:
+        if socket_joint is None:
+            time.sleep(0.1)
+            continue
         try:
             message_parts = socket_joint.recv_multipart()
             if len(message_parts) < 2:
@@ -122,6 +180,11 @@ def recv_joint_server():
 
             event_id = message_parts[0].decode('utf-8')
             buffer_bytes = message_parts[1]
+
+            # Mark as connected on first successful receive
+            if not _joint_connected:
+                _joint_connected = True
+                print("[SO101] Joint data stream connected")
 
             if 'joint' in event_id:
                 joint_array = np.frombuffer(buffer_bytes, dtype=np.float32)
@@ -133,10 +196,10 @@ def recv_joint_server():
                         recv_joint[event_id] = joint_array
 
         except zmq.Again:
-            print(f"SO101 Joint Received Timeout")
+            # Timeout waiting for data, silently continue
             continue
         except Exception as e:
-            print("recv joint error:", e)
+            print("[SO101] recv joint error:", e)
             break
 
 
@@ -286,6 +349,9 @@ class SO101Manipulator:
         }
     
     def connect(self):
+        # Initialize ZeroMQ sockets (lazy initialization)
+        _init_zmq()
+
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
@@ -684,16 +750,33 @@ class SO101Manipulator:
                 "Aloha is not connected. You need to run `robot.connect()` before disconnecting."
             )
 
+        print("[SO101] Disconnecting robot...")
         self.is_connected = False
+
+        # Stop receiver threads
         global running_recv_image_server
         global running_recv_joint_server
         running_recv_image_server = False
         running_recv_joint_server = False
 
-        self.recv_image_thread.join()
-        self.recv_joint_thread.join()
-        
+        # Wait for threads to finish (with timeout)
+        if self.recv_image_thread.is_alive():
+            self.recv_image_thread.join(timeout=3.0)
+        if self.recv_joint_thread.is_alive():
+            self.recv_joint_thread.join(timeout=3.0)
+
+        # Clean up ZeroMQ sockets
+        _cleanup_zmq()
+
+        # Clear received data
+        recv_images.clear()
+        recv_joint.clear()
+
+        print("[SO101] Robot disconnected")
 
     def __del__(self):
         if getattr(self, "is_connected", False):
-            self.disconnect()
+            try:
+                self.disconnect()
+            except Exception as e:
+                print(f"[SO101] Error during cleanup: {e}")
