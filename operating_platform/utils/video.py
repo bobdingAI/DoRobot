@@ -219,7 +219,7 @@ def _build_ffmpeg_cmd(
     fps: int,
     vcodec: str,
     pix_fmt: str = "yuv420p",
-    g: int | None = None,
+    g: int | None = 1,
     crf: int | None = None,
     fast_decode: int = 0,
     log_level: Optional[str] = "error",
@@ -264,7 +264,7 @@ def _build_ffmpeg_cmd(
         if g is not None:
             ffmpeg_args["-g"] = str(g)
         else:
-            ffmpeg_args["-g"] = str(fps * 2)  # Default: keyframe every 2 seconds
+            ffmpeg_args["-g"] = str(fps)  # Default: keyframe every 2 seconds
         if crf is not None:
             ffmpeg_args["-crf"] = str(crf)
         else:
@@ -322,7 +322,7 @@ def _encode_with_cpu_fallback(
         fps=fps,
         vcodec="libx264",
         pix_fmt=pix_fmt,
-        g=None,  # Default: keyframe every 2 seconds
+        g=1,  # Default: keyframe every 2 seconds
         crf=None,  # Default: 23 (balanced quality)
         fast_decode=fast_decode,
         log_level=None,
@@ -359,7 +359,7 @@ def encode_video_frames(
     fps: int,
     vcodec: Literal["h264_ascend", "libopenh264", "libx264"] = "h264_ascend",
     pix_fmt: str = "yuv420p",
-    g: int | None = None,
+    g: int | None = 1,
     crf: int | None = None,
     fast_decode: int = 0,
     log_level: Optional[str] = "error",
