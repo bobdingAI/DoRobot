@@ -4,6 +4,46 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.47 (2025-12-05) - Fix PyTorch/torchvision Version Conflicts
+
+### Summary
+Fixed PyTorch version conflicts caused by `lerobot[feetech]` or other packages installing incompatible torchvision versions.
+
+### Problem
+After running `pip install -e .` and `pip install 'lerobot[feetech]'`, the torchvision version gets overwritten to an incompatible version, causing runtime errors:
+```
+RuntimeError: operator torchvision::nms does not exist. We performed an exhaustive search over all registered ops, but could not find it. ...
+This could be a bug in PyTorch which might occur if torchvision is installed with a different version of PyTorch.
+```
+
+### Root Cause
+The `lerobot[feetech]` package (and possibly other dependencies) specifies torchvision constraints that override the manually installed `torchvision==0.20.1` with an incompatible version that doesn't match `torch==2.5.1`.
+
+### Solution
+Added Step 9.5 (in `setup_env.sh`) / Step 8.5 (in `setup_env_base.sh`) to reinstall the correct PyTorch versions **after** all other packages are installed:
+- `torch==2.5.1`
+- `torchvision==0.20.1`
+- `torchaudio==2.5.1`
+- `torch-npu==2.5.1` (if NPU mode)
+
+This ensures version compatibility is maintained regardless of what other packages try to install.
+
+### Changes
+
+**File: `scripts/setup_env.sh`**
+- Added Step 9.5: Reinstall PyTorch after all packages installed
+- Reinstall torch-npu if using NPU device
+
+**File: `scripts/setup_env_base.sh`**
+- Added Step 8.5: Same fix for base environment setup script
+
+### Impact
+- NPU inference now works correctly with `torch-npu==2.5.1`
+- No more `operator torchvision::nms does not exist` errors
+- Package installation order no longer matters
+
+---
+
 ## v0.2.46 (2025-12-05) - Fix OpenCV Crash on Headless Exit
 
 ### Summary

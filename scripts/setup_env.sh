@@ -328,6 +328,20 @@ main() {
     log_step "Installing Rerun SDK..."
     pip install rerun-sdk
 
+    # Step 9.5: CRITICAL - Reinstall PyTorch to fix version conflicts
+    # Some packages (like lerobot) may install incompatible torchvision versions
+    # This ensures we have the correct versions for torch-npu compatibility
+    log_step "Fixing PyTorch versions (ensuring compatibility)..."
+    PYTORCH_CMD=$(get_pytorch_install_cmd)
+    log_info "Reinstalling: $PYTORCH_CMD"
+    eval "$PYTORCH_CMD"
+
+    # Reinstall torch-npu if using NPU (must be after PyTorch reinstall)
+    if [ "$DEVICE_TYPE" == "npu" ]; then
+        log_info "Reinstalling torch-npu==$TORCH_NPU_VERSION..."
+        pip install torch-npu==$TORCH_NPU_VERSION
+    fi
+
     # Step 10: Install system dependencies (Linux only)
     if [ "$(uname)" == "Linux" ]; then
         log_step "Installing Linux system dependencies..."
