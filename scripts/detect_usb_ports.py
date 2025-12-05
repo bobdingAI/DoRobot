@@ -48,37 +48,77 @@ def get_device_info(device_path: str) -> dict:
     return info
 
 
+def is_video_capture_device(dev_path: str) -> bool:
+    """Check if device is a video capture device using v4l2-ctl or ioctl."""
+    # Method 1: Try v4l2-ctl (most reliable)
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "--device=" + dev_path, "--all"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Check if it's a capture device (has video capture capability)
+        if "Video Capture" in result.stdout:
+            return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Method 2: Check udevadm for ID_V4L_CAPABILITIES
+    try:
+        result = subprocess.run(
+            ["udevadm", "info", "--query=all", "--name=" + dev_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Look for capture capability
+        if "ID_V4L_CAPABILITIES=:capture:" in result.stdout:
+            return True
+        # Also check if it's a video4linux device at all
+        if "ID_V4L_VERSION" in result.stdout:
+            # Assume it's a capture device if no specific capability info
+            # but skip if it looks like a metadata device
+            dev_num = dev_path.replace("/dev/video", "")
+            if dev_num.isdigit():
+                # On many systems, even numbered devices are capture, odd are metadata
+                # But this isn't always true, so we include all if we can't determine
+                return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Method 3: Fallback - just check if device exists and is accessible
+    try:
+        if os.path.exists(dev_path) and os.access(dev_path, os.R_OK):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def find_video_devices() -> list:
     """Find all video capture devices."""
     devices = []
 
     # Check /dev/video* devices
     for dev in sorted(glob.glob("/dev/video*")):
-        # Skip metadata devices (usually odd numbers on many systems)
-        # But we need to check if it's a capture device
         try:
-            import cv2
-            cap = cv2.VideoCapture(dev)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                cap.release()
-                if ret:
-                    info = get_device_info(dev)
-                    info["type"] = "video"
+            # Use v4l2/udevadm to check if it's a capture device (doesn't require OpenCV)
+            if not is_video_capture_device(dev):
+                continue
 
-                    # Find corresponding by-path symlink
-                    by_path_dir = Path("/dev/v4l/by-path")
-                    if by_path_dir.exists():
-                        for link in by_path_dir.iterdir():
-                            if link.resolve() == Path(dev).resolve():
-                                info["by_path_link"] = str(link)
-                                break
-
-                    devices.append(info)
-        except ImportError:
-            # If cv2 not available, just list the device
             info = get_device_info(dev)
             info["type"] = "video"
+
+            # Find corresponding by-path symlink
+            by_path_dir = Path("/dev/v4l/by-path")
+            if by_path_dir.exists():
+                for link in by_path_dir.iterdir():
+                    if link.resolve() == Path(dev).resolve():
+                        info["by_path_link"] = str(link)
+                        break
+
             devices.append(info)
         except Exception:
             pass

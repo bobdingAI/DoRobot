@@ -4,6 +4,29 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.49 (2025-12-05) - Fix USB Video Device Detection
+
+### Summary
+Fixed `detect_usb_ports.py` not detecting video devices on Orange Pi and other systems where OpenCV can't open cameras directly.
+
+### Problem
+The script used OpenCV (`cv2.VideoCapture`) to verify video devices, which failed on Orange Pi even though the cameras work with other tools.
+
+### Solution
+Replace OpenCV-based detection with v4l2-ctl and udevadm-based detection:
+1. Try `v4l2-ctl --device=/dev/videoX --all` to check for "Video Capture" capability
+2. Fallback to `udevadm info` to check `ID_V4L_CAPABILITIES`
+3. Final fallback: check if device exists and is readable
+
+### Changes
+
+**File: `scripts/detect_usb_ports.py`**
+- Added `is_video_capture_device()` function using v4l2-ctl/udevadm
+- Removed OpenCV dependency from video device detection
+- More reliable detection on embedded systems
+
+---
+
 ## v0.2.48 (2025-12-05) - Fix OpenCV GUI Support with conda-forge
 
 ### Summary
