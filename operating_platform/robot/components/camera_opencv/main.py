@@ -86,10 +86,33 @@ def main():
     video_capture_path = os.getenv("CAPTURE_PATH", args.path)
     encoding = os.getenv("ENCODING", "bgr8")
 
-    if isinstance(video_capture_path, str) and video_capture_path.isnumeric():
-        video_capture_path = int(video_capture_path)
+    # Support both numeric indices and device paths
+    # Device paths can be:
+    #   - Numeric index: 0, 1, 2
+    #   - Direct device: /dev/video0
+    #   - Persistent path: /dev/v4l/by-path/platform-xxx-video-index0
+    if isinstance(video_capture_path, str):
+        video_capture_path = video_capture_path.strip().strip('"').strip("'")
+        if video_capture_path.isnumeric():
+            video_capture_path = int(video_capture_path)
+        # Keep string paths as-is (e.g., /dev/video0, /dev/v4l/by-path/...)
+
+    # Resolve symlinks for display purposes
+    display_path = video_capture_path
+    if isinstance(video_capture_path, str) and os.path.islink(video_capture_path):
+        try:
+            resolved = os.path.realpath(video_capture_path)
+            print(f"[camera_opencv] Using persistent path: {video_capture_path} -> {resolved}")
+            display_path = f"{video_capture_path} -> {resolved}"
+        except Exception:
+            pass
 
     video_capture = cv2.VideoCapture(video_capture_path)
+    if not video_capture.isOpened():
+        print(f"[camera_opencv] Warning: Failed to open camera at {display_path}")
+        # Retry once after a short delay (device might be initializing)
+        time.sleep(0.5)
+        video_capture = cv2.VideoCapture(video_capture_path)
     _video_capture = video_capture  # Store globally for cleanup
 
     image_width = os.getenv("IMAGE_WIDTH", args.image_width)

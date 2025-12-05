@@ -4,6 +4,53 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.35 (2025-12-04) - Persistent USB Port Configuration
+
+### Summary
+Added persistent USB port configuration to ensure device paths remain stable across episodes and cable reconnections.
+
+### Problem
+When starting new episode data collection, USB and video ports change (e.g., `/dev/video0` becomes `/dev/video2`, `/dev/ttyACM0` becomes `/dev/ttyACM1`). This indicates resources are not fully released, or Linux kernel assigns different device numbers.
+
+### Solution
+Use persistent device paths based on USB topology instead of kernel-assigned indices:
+- Cameras: `/dev/v4l/by-path/...` instead of `/dev/video0`
+- Serial: `/dev/serial/by-path/...` or `/dev/serial/by-id/...` instead of `/dev/ttyACM0`
+
+These paths are based on physical USB port location, not enumeration order.
+
+### Changes
+
+**New File: `scripts/detect_usb_ports.py`**
+- Utility script to detect USB devices and display persistent paths
+- `--yaml` flag outputs ready-to-use YAML configuration
+- `--watch` flag monitors device changes in real-time
+
+**File: `operating_platform/robot/components/camera_opencv/main.py`**
+- Support for device path strings (not just numeric indices)
+- Accepts `/dev/v4l/by-path/...` paths in `CAPTURE_PATH`
+- Logs symlink resolution for debugging
+- Retry logic on initial camera open failure
+
+**File: `operating_platform/robot/robots/so101_v1/dora_teleoperate_dataflow.yml`**
+- Added documentation header explaining port stability issue
+- Added example persistent paths as comments for cameras and arms
+
+**File: `CLAUDE.md`**
+- Added persistent USB port configuration documentation
+
+### Usage
+```bash
+# Detect your device paths (run on Orange Pi)
+python scripts/detect_usb_ports.py --yaml
+
+# Update dora_teleoperate_dataflow.yml with persistent paths:
+# CAPTURE_PATH: "/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:1:1.0-video-index0"
+# PORT: "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:2:1.0"
+```
+
+---
+
 ## V25 (2025-11-29) - USB Port & ZeroMQ Socket Cleanup
 
 ### Summary
