@@ -4,6 +4,28 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.38 (2025-12-04) - Base Environment Setup Script
+
+### Summary
+Added `setup_env_base.sh` script that installs into the current conda environment instead of creating a new one.
+
+### Changes
+
+**New File: `scripts/setup_env_base.sh`**
+- Installs all dependencies into the current active conda environment
+- No new conda environment created
+- Same options as `setup_env.sh`: `--device`, `--npu`, `--training`, etc.
+- Confirms before installing to avoid accidental modifications
+- Supports apt, dnf, and yum package managers
+
+### Usage
+```bash
+conda activate base
+bash scripts/setup_env_base.sh --npu
+```
+
+---
+
 ## v0.2.36 (2025-12-04) - OpenEuler/RHEL Package Manager Support
 
 ### Summary
