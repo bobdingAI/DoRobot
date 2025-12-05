@@ -19,7 +19,7 @@ set -e
 
 # Default configuration
 ENV_NAME="dorobot"
-PYTHON_VERSION="3.11"
+PYTHON_VERSION="3.10"
 DEVICE_TYPE="cpu"
 TORCH_NPU_VERSION="2.5.1"
 INSTALL_EXTRAS=""  # Optional: training, simulation, tensorflow, all
