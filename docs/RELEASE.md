@@ -4,6 +4,22 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.39 (2025-12-04) - Disable Update Repos During Install
+
+### Summary
+Prevent dnf/yum from refreshing update repositories during package installation on OpenEuler/RHEL.
+
+### Changes
+
+**Files: `scripts/setup_env.sh`, `scripts/setup_env_base.sh`**
+- Add `--disablerepo=*update*` to dnf/yum commands
+- Add `--setopt=install_weak_deps=False` to dnf for faster install
+- Fallback to normal install if package not found in base repos
+
+This prevents the slow metadata refresh from update repos during installation.
+
+---
+
 ## v0.2.38 (2025-12-04) - Base Environment Setup Script
 
 ### Summary

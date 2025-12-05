@@ -334,39 +334,57 @@ main() {
             # OpenEuler/Fedora/RHEL 8+
             PKG_MANAGER="dnf"
             log_info "Detected OpenEuler/Fedora/RHEL (dnf)"
+            # Use --disablerepo=*-update* to prevent pulling from update repos
+            # Use --setopt=install_weak_deps=False to speed up install
+            DNF_OPTS="--disablerepo=*update* --setopt=install_weak_deps=False"
             log_info "Installing speech-dispatcher for voice prompts..."
-            sudo dnf install -y speech-dispatcher || {
-                log_warn "Could not install speech-dispatcher automatically."
-                log_warn "Please run: sudo dnf install speech-dispatcher"
+            sudo dnf install -y $DNF_OPTS speech-dispatcher || {
+                # Fallback without disabling repos if package not found
+                sudo dnf install -y speech-dispatcher || {
+                    log_warn "Could not install speech-dispatcher automatically."
+                    log_warn "Please run: sudo dnf install speech-dispatcher"
+                }
             }
             log_info "Installing portaudio for audio recording..."
-            sudo dnf install -y portaudio-devel || {
-                log_warn "Could not install portaudio-devel automatically."
-                log_warn "Please run: sudo dnf install portaudio-devel"
+            sudo dnf install -y $DNF_OPTS portaudio-devel || {
+                sudo dnf install -y portaudio-devel || {
+                    log_warn "Could not install portaudio-devel automatically."
+                    log_warn "Please run: sudo dnf install portaudio-devel"
+                }
             }
             log_info "Installing additional development tools..."
-            sudo dnf install -y gcc gcc-c++ make || {
-                log_warn "Could not install development tools automatically."
-                log_warn "Please run: sudo dnf install gcc gcc-c++ make"
+            sudo dnf install -y $DNF_OPTS gcc gcc-c++ make || {
+                sudo dnf install -y gcc gcc-c++ make || {
+                    log_warn "Could not install development tools automatically."
+                    log_warn "Please run: sudo dnf install gcc gcc-c++ make"
+                }
             }
         elif command -v yum &> /dev/null; then
             # CentOS/RHEL 7/older OpenEuler
             PKG_MANAGER="yum"
             log_info "Detected CentOS/RHEL/OpenEuler (yum)"
+            # Use --disablerepo=*-update* to prevent pulling from update repos
+            YUM_OPTS="--disablerepo=*update*"
             log_info "Installing speech-dispatcher for voice prompts..."
-            sudo yum install -y speech-dispatcher || {
-                log_warn "Could not install speech-dispatcher automatically."
-                log_warn "Please run: sudo yum install speech-dispatcher"
+            sudo yum install -y $YUM_OPTS speech-dispatcher || {
+                sudo yum install -y speech-dispatcher || {
+                    log_warn "Could not install speech-dispatcher automatically."
+                    log_warn "Please run: sudo yum install speech-dispatcher"
+                }
             }
             log_info "Installing portaudio for audio recording..."
-            sudo yum install -y portaudio-devel || {
-                log_warn "Could not install portaudio-devel automatically."
-                log_warn "Please run: sudo yum install portaudio-devel"
+            sudo yum install -y $YUM_OPTS portaudio-devel || {
+                sudo yum install -y portaudio-devel || {
+                    log_warn "Could not install portaudio-devel automatically."
+                    log_warn "Please run: sudo yum install portaudio-devel"
+                }
             }
             log_info "Installing additional development tools..."
-            sudo yum install -y gcc gcc-c++ make || {
-                log_warn "Could not install development tools automatically."
-                log_warn "Please run: sudo yum install gcc gcc-c++ make"
+            sudo yum install -y $YUM_OPTS gcc gcc-c++ make || {
+                sudo yum install -y gcc gcc-c++ make || {
+                    log_warn "Could not install development tools automatically."
+                    log_warn "Please run: sudo yum install gcc gcc-c++ make"
+                }
             }
         else
             log_warn "Unknown package manager. Please install manually:"
