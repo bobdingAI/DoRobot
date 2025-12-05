@@ -118,6 +118,10 @@ class RecordConfig():
     # When False, normal local video encoding is performed
     cloud_offload: bool = False
 
+    # Display camera visualization during recording
+    # Set to False for headless systems without GUI
+    display: bool = True
+
     record_cmd = None
 
 

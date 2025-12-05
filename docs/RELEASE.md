@@ -4,6 +4,58 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.41 (2025-12-05) - Add SHOW Parameter and Change CLOUD_OFFLOAD Default
+
+### Summary
+Added `SHOW` parameter for headless operation and changed `CLOUD_OFFLOAD` default to `0` (local encoding).
+
+### Changes
+
+**File: `scripts/run_so101.sh`**
+- Changed `CLOUD_OFFLOAD` default from `1` to `0` (local encoding by default)
+- Added `SHOW` parameter (default: `1`, set to `0` for headless systems)
+- Updated help text and examples
+
+**File: `operating_platform/core/record.py`**
+- Added `display` field to `RecordConfig` (default: `True`)
+
+**File: `operating_platform/core/main.py`**
+- Use `show_display` flag that combines user setting with headless detection
+- Conditionally create `CameraDisplay` only when display is enabled
+- Updated all display loops to check `show_display`
+
+**File: `README.md`**
+- Updated environment variables documentation
+- Added data collection examples with mode combinations
+- Added mode summary table
+
+### Usage Examples
+
+```bash
+# Default: Local encoding with camera display (NPU enabled)
+bash scripts/run_so101.sh
+
+# Headless mode (no camera display)
+SHOW=0 bash scripts/run_so101.sh
+
+# Cloud mode (upload to cloud for encoding)
+CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+
+# Headless + cloud mode
+SHOW=0 CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+```
+
+### Mode Summary
+
+| SHOW | CLOUD_OFFLOAD | Result |
+|------|---------------|--------|
+| 1 | 0 | Camera display + local NPU encoding (default) |
+| 0 | 0 | Headless + local NPU encoding |
+| 1 | 1 | Camera display + cloud upload |
+| 0 | 1 | Headless + cloud upload |
+
+---
+
 ## v0.2.40 (2025-12-04) - Fix PyTorch Install for ARM64/aarch64
 
 ### Summary

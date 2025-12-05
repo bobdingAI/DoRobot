@@ -269,8 +269,41 @@ python operating_platform/core/inference.py \
 | `CONDA_ENV` | `dorobot` | Conda environment name |
 | `REPO_ID` | `so101-test` | Dataset repository ID |
 | `SINGLE_TASK` | `start and test so101 arm.` | Task description |
-| `USE_NPU` | `0` | Set to `1` for Ascend NPU support |
+| `USE_NPU` | `1` | Ascend NPU support (set to `0` to disable) |
+| `CLOUD_OFFLOAD` | `0` | Cloud mode (set to `1` for cloud encoding/training) |
+| `SHOW` | `1` | Camera display (set to `0` for headless systems) |
 | `ASCEND_TOOLKIT_PATH` | `/usr/local/Ascend/ascend-toolkit` | CANN toolkit path |
+
+### Data Collection Examples
+
+```bash
+# Default: Local encoding with camera display (NPU enabled)
+bash scripts/run_so101.sh
+
+# Headless mode (no camera display, for systems without GUI)
+SHOW=0 bash scripts/run_so101.sh
+
+# Cloud mode (upload raw images to cloud for encoding/training)
+CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+
+# Headless + cloud mode
+SHOW=0 CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+
+# Disable NPU (for non-Ascend hardware)
+USE_NPU=0 bash scripts/run_so101.sh
+
+# Custom dataset name
+REPO_ID=my-dataset bash scripts/run_so101.sh
+```
+
+**Mode Summary:**
+
+| SHOW | CLOUD_OFFLOAD | Result |
+|------|---------------|--------|
+| 1 | 0 | Camera display + local NPU encoding (default) |
+| 0 | 0 | Headless + local NPU encoding |
+| 1 | 1 | Camera display + cloud upload (no local encoding) |
+| 0 | 1 | Headless + cloud upload (no local encoding) |
 
 ## Project Structure
 

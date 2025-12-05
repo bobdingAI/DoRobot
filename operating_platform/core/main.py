@@ -256,7 +256,15 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         async_save_timeout_s=cfg.record.async_save_timeout_s,
         async_save_max_retries=cfg.record.async_save_max_retries,
         cloud_offload=getattr(cfg.record, 'cloud_offload', False),
+        display=getattr(cfg.record, 'display', True),
     )
+
+    # Determine if display should be enabled (user setting AND not headless)
+    show_display = record_cfg.display and not is_headless()
+    if not record_cfg.display:
+        logging.info("Display disabled by user (--record.display=false or SHOW=0)")
+    elif is_headless():
+        logging.info("Display disabled (headless environment detected)")
 
     # Log cloud offload mode status
     if record_cfg.cloud_offload:
@@ -277,11 +285,14 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     logging.info("="*30)
 
     # Create unified camera display (combines all cameras into one window)
-    camera_display = CameraDisplay(
-        window_name="Recording - Cameras",
-        layout="horizontal",
-        show_labels=True
-    )
+    # Only create if display is enabled
+    camera_display = None
+    if show_display:
+        camera_display = CameraDisplay(
+            window_name="Recording - Cameras",
+            layout="horizontal",
+            show_labels=True
+        )
 
     # 开始记录（带倒计时）- 只做一次
     if record_cmd.get("countdown_seconds", 3) > 0:
@@ -312,8 +323,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             daemon.update()
             observation = daemon.get_observation()
 
-            # 显示图像（仅在非无头模式）- 使用统一相机窗口
-            if observation and not is_headless():
+            # 显示图像（仅在display启用时）- 使用统一相机窗口
+            if observation and show_display and camera_display:
                 key = camera_display.show(observation, episode_index=current_episode, status="Recording")
             else:
                 key = cv2.waitKey(10)
@@ -352,7 +363,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     observation = daemon.get_observation()
 
                     # Show reset view with status
-                    if observation and not is_headless():
+                    if observation and show_display and camera_display:
                         next_episode = record.dataset.meta.total_episodes
                         key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press P")
                     else:
@@ -364,7 +375,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     elif key in [ord('e'), ord('E')]:
                         logging.info("User aborted during reset")
                         # Trigger exit by setting key and breaking
-                        camera_display.close()
+                        if camera_display:
+                            camera_display.close()
                         cv2.destroyAllWindows()
                         daemon.stop()
                         return
@@ -388,7 +400,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                 # Close camera display window FIRST to release video resources
                 logging.info("Closing camera display...")
-                camera_display.close()
+                if camera_display:
+                    camera_display.close()
                 cv2.destroyAllWindows()
                 cv2.waitKey(1)  # Process any pending window events
                 logging.info("Camera display closed")

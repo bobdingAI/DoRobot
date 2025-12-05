@@ -24,10 +24,13 @@ CONDA_ENV="${CONDA_ENV:-dorobot}"
 USE_NPU="${USE_NPU:-1}"
 ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
-# Cloud Offload Configuration - enabled by default (recommended workflow)
-# When enabled, raw images are kept and uploaded to cloud for encoding/training
-# Set CLOUD_OFFLOAD=0 to use local video encoding instead
-CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-1}"
+# Cloud Offload Configuration - disabled by default (local encoding)
+# Set CLOUD_OFFLOAD=1 to upload raw images to cloud for encoding/training
+CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
+
+# Display Configuration - enabled by default
+# Set SHOW=0 to disable camera visualization (for headless systems without GUI)
+SHOW="${SHOW:-1}"
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -249,6 +252,9 @@ start_cli() {
     if [ "$CLOUD_OFFLOAD" == "1" ]; then
         log_info "  cloud_offload: enabled (skip local video encoding)"
     fi
+    if [ "$SHOW" == "0" ]; then
+        log_info "  display: disabled (headless mode)"
+    fi
 
     # Build command arguments
     local cmd_args=(
@@ -260,6 +266,13 @@ start_cli() {
     # Add cloud_offload if enabled
     if [ "$CLOUD_OFFLOAD" == "1" ]; then
         cmd_args+=(--record.cloud_offload=true)
+    fi
+
+    # Add display setting
+    if [ "$SHOW" == "0" ]; then
+        cmd_args+=(--record.display=false)
+    else
+        cmd_args+=(--record.display=true)
     fi
 
     # Start CLI in foreground (blocks until exit)
@@ -279,31 +292,36 @@ print_usage() {
     echo "  REPO_ID             Dataset repository ID (default: so101-test)"
     echo "  SINGLE_TASK         Task description (default: 'start and test so101 arm.')"
     echo "  USE_NPU             Ascend NPU support (default: 1, set to 0 to disable)"
-    echo "  CLOUD_OFFLOAD       Cloud mode (default: 1, set to 0 for local encoding)"
+    echo "  CLOUD_OFFLOAD       Cloud mode (default: 0, set to 1 for cloud encoding)"
     echo "                      When enabled, raw images are uploaded to cloud for training"
+    echo "  SHOW                Camera display (default: 1, set to 0 for headless mode)"
+    echo "                      Set to 0 when running on systems without GUI"
     echo "  ASCEND_TOOLKIT_PATH Path to CANN toolkit (default: /usr/local/Ascend/ascend-toolkit)"
     echo "  DORA_INIT_DELAY     Seconds to wait for DORA to initialize (default: 5)"
     echo "  SOCKET_TIMEOUT      Seconds to wait for ZeroMQ sockets (default: 30)"
     echo ""
     echo "Examples:"
-    echo "  $0                              # Default: cloud mode + NPU enabled"
+    echo "  $0                              # Default: local encoding + NPU enabled"
     echo "  REPO_ID=my-dataset $0           # Custom dataset name"
     echo ""
-    echo "  # Disable cloud mode (use local video encoding):"
-    echo "  CLOUD_OFFLOAD=0 $0"
+    echo "  # Enable cloud mode (upload to cloud for encoding/training):"
+    echo "  CLOUD_OFFLOAD=1 $0"
+    echo ""
+    echo "  # Headless mode (no camera display, for systems without GUI):"
+    echo "  SHOW=0 $0"
+    echo ""
+    echo "  # Headless + cloud mode:"
+    echo "  SHOW=0 CLOUD_OFFLOAD=1 $0"
     echo ""
     echo "  # Disable NPU (for non-Ascend hardware):"
     echo "  USE_NPU=0 $0"
-    echo ""
-    echo "  # Local mode without NPU:"
-    echo "  USE_NPU=0 CLOUD_OFFLOAD=0 $0"
     echo ""
     echo "  # With longer init delay (if timeout issues):"
     echo "  DORA_INIT_DELAY=10 $0"
     echo ""
     echo "Note: This script starts both DORA dataflow and CLI automatically."
     echo "      Press 'n' to save episode and start new one."
-    echo "      Press 'e' to stop recording and exit (with cloud training if enabled)."
+    echo "      Press 'e' to stop recording and exit."
 }
 
 # Main entry point
@@ -356,13 +374,12 @@ main() {
     echo "    'n' - Save episode and start new one"
     if [ "$CLOUD_OFFLOAD" == "1" ]; then
         echo "    'e' - Stop, upload to cloud, and train"
-        echo ""
-        echo "  Mode: Cloud Offload (default)"
     else
         echo "    'e' - Stop recording and exit"
-        echo ""
-        echo "  Mode: Local Encoding"
     fi
+    echo ""
+    echo "  Mode: $([ "$CLOUD_OFFLOAD" == "1" ] && echo "Cloud Offload" || echo "Local Encoding")"
+    echo "  Display: $([ "$SHOW" == "0" ] && echo "Disabled (headless)" || echo "Enabled")"
     echo "=========================================="
     echo ""
 
