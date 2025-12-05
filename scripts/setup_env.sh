@@ -314,16 +314,65 @@ main() {
     # Step 9: Install system dependencies (Linux only)
     if [ "$(uname)" == "Linux" ]; then
         log_step "Installing Linux system dependencies..."
-        log_info "Installing speech-dispatcher for voice prompts..."
-        sudo apt install -y speech-dispatcher || {
-            log_warn "Could not install speech-dispatcher automatically."
-            log_warn "Please run: sudo apt install speech-dispatcher"
-        }
-        log_info "Installing portaudio for audio recording..."
-        sudo apt install -y portaudio19-dev || {
-            log_warn "Could not install portaudio19-dev automatically."
-            log_warn "Please run: sudo apt install portaudio19-dev"
-        }
+
+        # Detect package manager
+        if command -v apt &> /dev/null; then
+            # Debian/Ubuntu
+            PKG_MANAGER="apt"
+            log_info "Detected Debian/Ubuntu (apt)"
+            log_info "Installing speech-dispatcher for voice prompts..."
+            sudo apt install -y speech-dispatcher || {
+                log_warn "Could not install speech-dispatcher automatically."
+                log_warn "Please run: sudo apt install speech-dispatcher"
+            }
+            log_info "Installing portaudio for audio recording..."
+            sudo apt install -y portaudio19-dev || {
+                log_warn "Could not install portaudio19-dev automatically."
+                log_warn "Please run: sudo apt install portaudio19-dev"
+            }
+        elif command -v dnf &> /dev/null; then
+            # OpenEuler/Fedora/RHEL 8+
+            PKG_MANAGER="dnf"
+            log_info "Detected OpenEuler/Fedora/RHEL (dnf)"
+            log_info "Installing speech-dispatcher for voice prompts..."
+            sudo dnf install -y speech-dispatcher || {
+                log_warn "Could not install speech-dispatcher automatically."
+                log_warn "Please run: sudo dnf install speech-dispatcher"
+            }
+            log_info "Installing portaudio for audio recording..."
+            sudo dnf install -y portaudio-devel || {
+                log_warn "Could not install portaudio-devel automatically."
+                log_warn "Please run: sudo dnf install portaudio-devel"
+            }
+            log_info "Installing additional development tools..."
+            sudo dnf install -y gcc gcc-c++ make || {
+                log_warn "Could not install development tools automatically."
+                log_warn "Please run: sudo dnf install gcc gcc-c++ make"
+            }
+        elif command -v yum &> /dev/null; then
+            # CentOS/RHEL 7/older OpenEuler
+            PKG_MANAGER="yum"
+            log_info "Detected CentOS/RHEL/OpenEuler (yum)"
+            log_info "Installing speech-dispatcher for voice prompts..."
+            sudo yum install -y speech-dispatcher || {
+                log_warn "Could not install speech-dispatcher automatically."
+                log_warn "Please run: sudo yum install speech-dispatcher"
+            }
+            log_info "Installing portaudio for audio recording..."
+            sudo yum install -y portaudio-devel || {
+                log_warn "Could not install portaudio-devel automatically."
+                log_warn "Please run: sudo yum install portaudio-devel"
+            }
+            log_info "Installing additional development tools..."
+            sudo yum install -y gcc gcc-c++ make || {
+                log_warn "Could not install development tools automatically."
+                log_warn "Please run: sudo yum install gcc gcc-c++ make"
+            }
+        else
+            log_warn "Unknown package manager. Please install manually:"
+            log_warn "  - speech-dispatcher (for voice prompts)"
+            log_warn "  - portaudio development library (for audio recording)"
+        fi
     fi
 
     # Step 10: Verify installation

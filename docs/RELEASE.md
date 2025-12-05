@@ -4,6 +4,29 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.36 (2025-12-04) - OpenEuler/RHEL Package Manager Support
+
+### Summary
+Added support for OpenEuler, Fedora, RHEL, and CentOS in the environment setup script.
+
+### Changes
+
+**File: `scripts/setup_env.sh`**
+- Auto-detect package manager (apt, dnf, yum)
+- Support for Debian/Ubuntu (apt): `speech-dispatcher`, `portaudio19-dev`
+- Support for OpenEuler/Fedora/RHEL 8+ (dnf): `speech-dispatcher`, `portaudio-devel`, `gcc`, `gcc-c++`, `make`
+- Support for CentOS/RHEL 7 (yum): same packages as dnf
+- Fallback message for unknown package managers
+
+### Supported Distributions
+- Debian/Ubuntu (apt)
+- OpenEuler (dnf/yum)
+- Fedora (dnf)
+- RHEL 8+ (dnf)
+- CentOS/RHEL 7 (yum)
+
+---
+
 ## v0.2.35 (2025-12-04) - Persistent USB Port Configuration
 
 ### Summary
