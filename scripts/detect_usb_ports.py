@@ -7,10 +7,12 @@ Use persistent paths in YAML config to ensure ports don't change between
 episodes or when cables are reconnected.
 
 Usage:
-    python scripts/detect_usb_ports.py           # Show all devices
-    python scripts/detect_usb_ports.py --yaml    # Output YAML snippet
-    python scripts/detect_usb_ports.py --save    # Save config to ~/.dorobot_device.conf
-    python scripts/detect_usb_ports.py --watch   # Monitor device changes
+    python scripts/detect_usb_ports.py                 # Show all devices
+    python scripts/detect_usb_ports.py --yaml          # Output YAML snippet
+    python scripts/detect_usb_ports.py --save          # Save config to ~/.dorobot_device.conf
+    python scripts/detect_usb_ports.py --save --chmod  # Save config and set permissions
+    python scripts/detect_usb_ports.py --chmod         # Just set permissions (chmod 777)
+    python scripts/detect_usb_ports.py --watch         # Monitor device changes
 """
 
 import argparse
@@ -255,7 +257,64 @@ def print_yaml_snippet(video_devices: list, serial_devices: list):
         print()
 
 
-def save_device_config(video_devices: list, serial_devices: list, output_path: str = None):
+def set_device_permissions(video_devices: list, serial_devices: list):
+    """
+    Set chmod 777 on all detected devices using sudo.
+    """
+    devices_to_chmod = []
+
+    # Collect video device paths
+    for dev in video_devices:
+        path = dev.get("by_path_link") or dev["path"]
+        devices_to_chmod.append(path)
+        # Also add the raw /dev/videoX path
+        if dev["path"] not in devices_to_chmod:
+            devices_to_chmod.append(dev["path"])
+
+    # Collect serial device paths
+    for dev in serial_devices:
+        path = dev.get("by_path_link") or dev.get("by_id_link") or dev["path"]
+        devices_to_chmod.append(path)
+        # Also add the raw /dev/ttyACMx path
+        if dev["path"] not in devices_to_chmod:
+            devices_to_chmod.append(dev["path"])
+
+    if not devices_to_chmod:
+        print("No devices to set permissions for.")
+        return
+
+    print(f"\n{'=' * 70}")
+    print("Setting device permissions (chmod 777)...")
+    print(f"{'=' * 70}")
+
+    # Build chmod command for all devices at once
+    existing_devices = [d for d in devices_to_chmod if os.path.exists(d)]
+
+    if not existing_devices:
+        print("No existing device paths found.")
+        return
+
+    print(f"Devices to chmod: {len(existing_devices)}")
+    for dev in existing_devices:
+        print(f"  - {dev}")
+
+    # Run sudo chmod 777
+    try:
+        cmd = ["sudo", "chmod", "777"] + existing_devices
+        print(f"\nRunning: sudo chmod 777 <devices>")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("Permissions set successfully!")
+        else:
+            print(f"Warning: chmod failed: {result.stderr}")
+    except Exception as e:
+        print(f"Error setting permissions: {e}")
+
+    print(f"{'=' * 70}\n")
+
+
+def save_device_config(video_devices: list, serial_devices: list, output_path: str = None, set_chmod: bool = False):
     """
     Save device configuration to a shell config file.
 
@@ -338,6 +397,10 @@ def save_device_config(video_devices: list, serial_devices: list, output_path: s
     print(f"\nThis file will be automatically loaded by run_so101.sh")
     print(f"To regenerate: python scripts/detect_usb_ports.py --save")
     print(f"{'=' * 70}\n")
+
+    # Set permissions if requested
+    if set_chmod:
+        set_device_permissions(video_devices, serial_devices)
 
     return output_path
 
@@ -436,6 +499,11 @@ Workflow for stable ports:
         action="store_true",
         help="Monitor device changes in real-time",
     )
+    parser.add_argument(
+        "--chmod",
+        action="store_true",
+        help="Set chmod 777 on detected devices (requires sudo)",
+    )
 
     args = parser.parse_args()
 
@@ -452,7 +520,10 @@ Workflow for stable ports:
         serial = find_serial_devices()
 
         if args.save:
-            save_device_config(video, serial, args.output)
+            save_device_config(video, serial, args.output, set_chmod=args.chmod)
+        elif args.chmod:
+            # Just chmod without saving
+            set_device_permissions(video, serial)
         elif args.yaml:
             print_yaml_snippet(video, serial)
         else:
