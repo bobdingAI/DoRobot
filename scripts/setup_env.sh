@@ -23,6 +23,7 @@ PYTHON_VERSION="3.11"
 DEVICE_TYPE="cpu"
 TORCH_NPU_VERSION="2.5.1"
 INSTALL_EXTRAS=""  # Optional: training, simulation, tensorflow, all
+UPDATE_MODE=false  # If true, update existing env instead of recreating
 
 # Colors for output
 RED='\033[0;31m'
@@ -93,6 +94,10 @@ parse_args() {
                 INSTALL_EXTRAS="all"
                 shift
                 ;;
+            --update)
+                UPDATE_MODE=true
+                shift
+                ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -121,6 +126,7 @@ print_usage() {
     echo "  --extras EXTRAS   Optional dependencies: training, simulation, tensorflow, all"
     echo "  --training        Shorthand for --extras training"
     echo "  --all             Install all optional dependencies"
+    echo "  --update          Update existing environment instead of recreating"
     echo "  --help            Show this help message"
     echo ""
     echo "Dependency Groups:"
@@ -138,6 +144,8 @@ print_usage() {
     echo "  $0 --npu                        # NPU with core only"
     echo "  $0 --npu --training             # NPU with training dependencies"
     echo "  $0 --cuda 12.4 --training       # CUDA 12.4 with training"
+    echo "  $0 --update                     # Update existing dorobot env"
+    echo "  $0 --update --training          # Add training deps to existing env"
     echo ""
     echo "NPU Notes:"
     echo "  - Requires CANN toolkit to be installed on the system"
@@ -207,6 +215,11 @@ main() {
     log_info "Environment name: $ENV_NAME"
     log_info "Python version: $PYTHON_VERSION"
     log_info "Device type: $DEVICE_TYPE"
+    if [ "$UPDATE_MODE" = true ]; then
+        log_info "Mode: UPDATE (install into existing env)"
+    else
+        log_info "Mode: CREATE (fresh environment)"
+    fi
     if [ "$DEVICE_TYPE" == "npu" ]; then
         log_info "torch-npu version: $TORCH_NPU_VERSION"
     fi
@@ -234,22 +247,38 @@ main() {
     conda config --set notify_outdated_conda false 2>/dev/null || true
 
     # Check if environment already exists
+    ENV_EXISTS=false
     if conda env list | grep -q "^${ENV_NAME} "; then
-        log_warn "Environment '$ENV_NAME' already exists."
-        read -p "Do you want to remove and recreate it? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_step "Removing existing environment..."
-            conda env remove -n "$ENV_NAME" -y
+        ENV_EXISTS=true
+    fi
+
+    if [ "$ENV_EXISTS" = true ]; then
+        if [ "$UPDATE_MODE" = true ]; then
+            log_info "Environment '$ENV_NAME' exists. Running in update mode..."
         else
-            log_info "Keeping existing environment. Exiting."
-            exit 0
+            log_warn "Environment '$ENV_NAME' already exists."
+            log_info "Use --update to install into existing environment."
+            read -p "Do you want to remove and recreate it? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                log_step "Removing existing environment..."
+                conda env remove -n "$ENV_NAME" -y
+                ENV_EXISTS=false
+            else
+                log_info "Keeping existing environment. Exiting."
+                log_info "Tip: Use '$0 --update' to update the existing environment."
+                exit 0
+            fi
         fi
     fi
 
-    # Step 1: Create conda environment
-    log_step "Creating conda environment '$ENV_NAME' with Python $PYTHON_VERSION..."
-    conda create -n "$ENV_NAME" python="$PYTHON_VERSION" -y
+    # Step 1: Create conda environment (skip if updating existing)
+    if [ "$ENV_EXISTS" = false ]; then
+        log_step "Creating conda environment '$ENV_NAME' with Python $PYTHON_VERSION..."
+        conda create -n "$ENV_NAME" python="$PYTHON_VERSION" -y
+    else
+        log_step "Using existing environment '$ENV_NAME'..."
+    fi
 
     # Initialize conda for this shell
     if [ -n "$CONDA_EXE" ]; then

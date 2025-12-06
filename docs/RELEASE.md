@@ -4,6 +4,83 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.57 (2025-12-06) - Setup Script Update Mode & Lazy Rerun Imports
+
+### Summary
+Added `--update` flag to setup_env.sh for installing into existing conda environments, and made rerun-sdk an optional dependency with lazy imports.
+
+### Changes
+
+**setup_env.sh**
+- Added `--update` flag to install into existing environment without recreating
+- When environment exists: shows tip about `--update` option
+- In update mode: skips conda create, uses existing environment
+- Added mode indicator (CREATE vs UPDATE) in setup header
+
+**setup_env_base.sh**
+- Added `-y`/`--yes` flag to skip confirmation prompt (for CI/automation)
+- Non-interactive mode logs when skipping confirmation
+
+**Lazy Rerun Imports**
+- `operating_platform/core/teleoperate.py`: Lazy import rerun and visualization utils
+- `operating_platform/dataset/visual/visual_dataset.py`: Lazy import rerun
+- Both files now only import rerun when the functionality is actually used
+- Clear error message if rerun not installed: "Install it with: pip install rerun-sdk"
+
+**Removed rerun-sdk from default installation**
+- Removed `pip install rerun-sdk` from setup_env.sh and setup_env_base.sh
+- Rerun is now optional - only needed for visualization features
+- Added comment: "Note: Rerun SDK is optional - only needed for visualization"
+
+### Usage
+
+```bash
+# Fresh install (default)
+bash scripts/setup_env.sh
+
+# Update existing environment
+bash scripts/setup_env.sh --update
+
+# Update with additional deps
+bash scripts/setup_env.sh --update --training
+
+# Non-interactive base install (CI)
+conda activate myenv && bash scripts/setup_env_base.sh -y
+```
+
+### Benefits
+- Faster reinstalls - no need to delete and recreate environment
+- CI/automation friendly with `-y` flag
+- Data collection works without rerun-sdk installed
+- Clear error message when visualization features need rerun
+
+---
+
+## v0.2.56 (2025-12-06) - Detect.sh Mechanism & Lazy Rerun Imports
+
+### Summary
+Cherry-picked detect.sh mechanism from dev_310p_yingma for USB device detection with persistent paths and automatic permissions.
+
+### Changes
+
+**New: scripts/detect.sh**
+- Simple wrapper that runs detect_usb_ports.py with --save --chmod
+
+**scripts/detect_usb_ports.py**
+- `--save` option to save config to `~/.dorobot_device.conf`
+- `--chmod` option to run `sudo chmod 777` on detected devices
+- Replaced OpenCV detection with v4l2-ctl/udevadm-based detection
+
+**scripts/run_so101.sh**
+- Loads device config from `~/.dorobot_device.conf` if exists
+- Auto chmod 777 on devices at startup
+- Environment variable exports for DORA YAML
+
+**DORA YAML files**
+- Use environment variables: `$CAMERA_TOP_PATH`, `$ARM_LEADER_PORT`, etc.
+
+---
+
 ## v0.2.49 (2025-12-05) - Fix USB Video Device Detection
 
 ### Summary

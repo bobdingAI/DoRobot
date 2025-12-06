@@ -20,6 +20,7 @@ set -e
 DEVICE_TYPE="cpu"
 TORCH_NPU_VERSION="2.5.1"
 INSTALL_EXTRAS=""  # Optional: training, simulation, tensorflow, all
+SKIP_CONFIRM=false  # If true, skip confirmation prompt
 
 # Colors for output
 RED='\033[0;31m'
@@ -82,6 +83,10 @@ parse_args() {
                 INSTALL_EXTRAS="all"
                 shift
                 ;;
+            -y|--yes)
+                SKIP_CONFIRM=true
+                shift
+                ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -111,6 +116,7 @@ print_usage() {
     echo "  --extras EXTRAS   Optional dependencies: training, simulation, tensorflow, all"
     echo "  --training        Shorthand for --extras training"
     echo "  --all             Install all optional dependencies"
+    echo "  -y, --yes         Skip confirmation prompt (for automation)"
     echo "  --help            Show this help message"
     echo ""
     echo "Dependency Groups:"
@@ -124,6 +130,7 @@ print_usage() {
     echo "  conda activate base && $0              # Install to base, core only"
     echo "  conda activate base && $0 --npu       # Install to base with NPU support"
     echo "  conda activate myenv && $0 --training # Install to myenv with training deps"
+    echo "  conda activate myenv && $0 -y         # Non-interactive install (CI/scripts)"
     echo ""
     echo "NPU Notes:"
     echo "  - Requires CANN toolkit to be installed on the system"
@@ -213,12 +220,16 @@ main() {
     echo ""
 
     # Confirm installation
-    log_warn "This will install packages into '$CONDA_DEFAULT_ENV' environment."
-    read -p "Continue? [y/N] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Aborted."
-        exit 0
+    if [ "$SKIP_CONFIRM" = true ]; then
+        log_info "Installing packages into '$CONDA_DEFAULT_ENV' environment (non-interactive mode)..."
+    else
+        log_warn "This will install packages into '$CONDA_DEFAULT_ENV' environment."
+        read -p "Continue? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Aborted."
+            exit 0
+        fi
     fi
 
     # Step 1: Install PyTorch
