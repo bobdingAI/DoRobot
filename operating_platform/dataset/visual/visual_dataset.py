@@ -69,8 +69,24 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
-import rerun as rr
 import torch
+
+# Lazy import rerun - only needed when visualize_dataset is called
+rr = None
+
+
+def _ensure_rerun_imported():
+    """Lazily import rerun when needed."""
+    global rr
+    if rr is None:
+        try:
+            import rerun as _rr
+            rr = _rr
+        except ImportError as e:
+            raise ImportError(
+                "rerun is required for dataset visualization. "
+                "Install it with: pip install rerun-sdk"
+            ) from e
 import torch.utils.data
 import tqdm
 import threading
@@ -115,6 +131,9 @@ def visualize_dataset(
     run_duration: float = 0.0,
     stop_event: Event | None = None,
 ) -> Path | None:
+    # Lazy import rerun when this function is called
+    _ensure_rerun_imported()
+
     if save:
         assert output_dir is not None, (
             "Set an output directory where to write .rrd files with `--output-dir path/to/directory`."

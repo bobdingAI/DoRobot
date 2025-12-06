@@ -7,9 +7,12 @@ Use persistent paths in YAML config to ensure ports don't change between
 episodes or when cables are reconnected.
 
 Usage:
-    python scripts/detect_usb_ports.py           # Show all devices
-    python scripts/detect_usb_ports.py --yaml    # Output YAML snippet
-    python scripts/detect_usb_ports.py --watch   # Monitor device changes
+    python scripts/detect_usb_ports.py                 # Show all devices
+    python scripts/detect_usb_ports.py --yaml          # Output YAML snippet
+    python scripts/detect_usb_ports.py --save          # Save config to ~/.dorobot_device.conf
+    python scripts/detect_usb_ports.py --save --chmod  # Save config and set permissions
+    python scripts/detect_usb_ports.py --chmod         # Just set permissions (chmod 777)
+    python scripts/detect_usb_ports.py --watch         # Monitor device changes
 """
 
 import argparse
@@ -47,37 +50,77 @@ def get_device_info(device_path: str) -> dict:
     return info
 
 
+def is_video_capture_device(dev_path: str) -> bool:
+    """Check if device is a video capture device using v4l2-ctl or ioctl."""
+    # Method 1: Try v4l2-ctl (most reliable)
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "--device=" + dev_path, "--all"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Check if it's a capture device (has video capture capability)
+        if "Video Capture" in result.stdout:
+            return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Method 2: Check udevadm for ID_V4L_CAPABILITIES
+    try:
+        result = subprocess.run(
+            ["udevadm", "info", "--query=all", "--name=" + dev_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Look for capture capability
+        if "ID_V4L_CAPABILITIES=:capture:" in result.stdout:
+            return True
+        # Also check if it's a video4linux device at all
+        if "ID_V4L_VERSION" in result.stdout:
+            # Assume it's a capture device if no specific capability info
+            # but skip if it looks like a metadata device
+            dev_num = dev_path.replace("/dev/video", "")
+            if dev_num.isdigit():
+                # On many systems, even numbered devices are capture, odd are metadata
+                # But this isn't always true, so we include all if we can't determine
+                return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Method 3: Fallback - just check if device exists and is accessible
+    try:
+        if os.path.exists(dev_path) and os.access(dev_path, os.R_OK):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def find_video_devices() -> list:
     """Find all video capture devices."""
     devices = []
 
     # Check /dev/video* devices
     for dev in sorted(glob.glob("/dev/video*")):
-        # Skip metadata devices (usually odd numbers on many systems)
-        # But we need to check if it's a capture device
         try:
-            import cv2
-            cap = cv2.VideoCapture(dev)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                cap.release()
-                if ret:
-                    info = get_device_info(dev)
-                    info["type"] = "video"
+            # Use v4l2/udevadm to check if it's a capture device (doesn't require OpenCV)
+            if not is_video_capture_device(dev):
+                continue
 
-                    # Find corresponding by-path symlink
-                    by_path_dir = Path("/dev/v4l/by-path")
-                    if by_path_dir.exists():
-                        for link in by_path_dir.iterdir():
-                            if link.resolve() == Path(dev).resolve():
-                                info["by_path_link"] = str(link)
-                                break
-
-                    devices.append(info)
-        except ImportError:
-            # If cv2 not available, just list the device
             info = get_device_info(dev)
             info["type"] = "video"
+
+            # Find corresponding by-path symlink
+            by_path_dir = Path("/dev/v4l/by-path")
+            if by_path_dir.exists():
+                for link in by_path_dir.iterdir():
+                    if link.resolve() == Path(dev).resolve():
+                        info["by_path_link"] = str(link)
+                        break
+
             devices.append(info)
         except Exception:
             pass
@@ -214,6 +257,154 @@ def print_yaml_snippet(video_devices: list, serial_devices: list):
         print()
 
 
+def set_device_permissions(video_devices: list, serial_devices: list):
+    """
+    Set chmod 777 on all detected devices using sudo.
+    """
+    devices_to_chmod = []
+
+    # Collect video device paths
+    for dev in video_devices:
+        path = dev.get("by_path_link") or dev["path"]
+        devices_to_chmod.append(path)
+        # Also add the raw /dev/videoX path
+        if dev["path"] not in devices_to_chmod:
+            devices_to_chmod.append(dev["path"])
+
+    # Collect serial device paths
+    for dev in serial_devices:
+        path = dev.get("by_path_link") or dev.get("by_id_link") or dev["path"]
+        devices_to_chmod.append(path)
+        # Also add the raw /dev/ttyACMx path
+        if dev["path"] not in devices_to_chmod:
+            devices_to_chmod.append(dev["path"])
+
+    if not devices_to_chmod:
+        print("No devices to set permissions for.")
+        return
+
+    print(f"\n{'=' * 70}")
+    print("Setting device permissions (chmod 777)...")
+    print(f"{'=' * 70}")
+
+    # Build chmod command for all devices at once
+    existing_devices = [d for d in devices_to_chmod if os.path.exists(d)]
+
+    if not existing_devices:
+        print("No existing device paths found.")
+        return
+
+    print(f"Devices to chmod: {len(existing_devices)}")
+    for dev in existing_devices:
+        print(f"  - {dev}")
+
+    # Run sudo chmod 777
+    try:
+        cmd = ["sudo", "chmod", "777"] + existing_devices
+        print(f"\nRunning: sudo chmod 777 <devices>")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("Permissions set successfully!")
+        else:
+            print(f"Warning: chmod failed: {result.stderr}")
+    except Exception as e:
+        print(f"Error setting permissions: {e}")
+
+    print(f"{'=' * 70}\n")
+
+
+def save_device_config(video_devices: list, serial_devices: list, output_path: str = None, set_chmod: bool = False):
+    """
+    Save device configuration to a shell config file.
+
+    This creates a file that can be sourced by run_so101.sh to set
+    persistent device paths automatically.
+    """
+    if output_path is None:
+        output_path = os.path.expanduser("~/.dorobot_device.conf")
+
+    # Build config content
+    lines = [
+        "# DoRobot Device Configuration",
+        "# Generated by: python scripts/detect_usb_ports.py --save",
+        f"# Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        "#",
+        "# This file is automatically sourced by run_so101.sh",
+        "# Regenerate with: python scripts/detect_usb_ports.py --save",
+        "",
+        "# === Camera Configuration ===",
+    ]
+
+    camera_vars = ["CAMERA_TOP_PATH", "CAMERA_WRIST_PATH", "CAMERA_WRIST2_PATH"]
+    for idx, dev in enumerate(video_devices):
+        if idx >= len(camera_vars):
+            break
+        var_name = camera_vars[idx]
+        path = dev.get("by_path_link") or dev["path"]
+        model = dev.get("model", "Camera")
+        lines.append(f"# {dev['path']} - {model}")
+        lines.append(f'{var_name}="{path}"')
+        lines.append("")
+
+    # Fill remaining camera vars with comments
+    for idx in range(len(video_devices), len(camera_vars)):
+        var_name = camera_vars[idx]
+        lines.append(f"# {var_name} - No device detected")
+        lines.append(f"# {var_name}=\"\"")
+        lines.append("")
+
+    lines.append("# === Arm Configuration ===")
+
+    arm_vars = [
+        ("ARM_LEADER_PORT", "Leader arm"),
+        ("ARM_FOLLOWER_PORT", "Follower arm"),
+        ("ARM_LEADER2_PORT", "Leader arm 2"),
+        ("ARM_FOLLOWER2_PORT", "Follower arm 2"),
+    ]
+
+    for idx, dev in enumerate(serial_devices):
+        if idx >= len(arm_vars):
+            break
+        var_name, description = arm_vars[idx]
+        path = dev.get("by_path_link") or dev.get("by_id_link") or dev["path"]
+        model = dev.get("model", "Serial device")
+        lines.append(f"# {dev['path']} - {model} ({description})")
+        lines.append(f'{var_name}="{path}"')
+        lines.append("")
+
+    # Fill remaining arm vars with comments
+    for idx in range(len(serial_devices), len(arm_vars)):
+        var_name, description = arm_vars[idx]
+        lines.append(f"# {var_name} - No device detected ({description})")
+        lines.append(f"# {var_name}=\"\"")
+        lines.append("")
+
+    # Write file
+    content = "\n".join(lines)
+
+    with open(output_path, "w") as f:
+        f.write(content)
+
+    print(f"\n{'=' * 70}")
+    print("Device configuration saved!")
+    print(f"{'=' * 70}")
+    print(f"\nConfig file: {output_path}")
+    print("\nContents:")
+    print("-" * 40)
+    print(content)
+    print("-" * 40)
+    print(f"\nThis file will be automatically loaded by run_so101.sh")
+    print(f"To regenerate: python scripts/detect_usb_ports.py --save")
+    print(f"{'=' * 70}\n")
+
+    # Set permissions if requested
+    if set_chmod:
+        set_device_permissions(video_devices, serial_devices)
+
+    return output_path
+
+
 def watch_devices():
     """Monitor device changes in real-time."""
     print("\nWatching for USB device changes... (Ctrl+C to stop)\n")
@@ -270,13 +461,20 @@ def main():
 Examples:
   python detect_usb_ports.py           # Show all devices
   python detect_usb_ports.py --yaml    # Output YAML config snippet
+  python detect_usb_ports.py --save    # Save config to ~/.dorobot_device.conf
   python detect_usb_ports.py --watch   # Monitor device changes
 
-Use persistent paths in your YAML config to ensure devices stay at the
+Use persistent paths in your config to ensure devices stay at the
 same paths even when:
   - Starting new recording episodes
   - Reconnecting USB cables
   - Rebooting the system
+
+Workflow for stable ports:
+  1. Connect all devices (cameras, arms) in desired order
+  2. Run: python scripts/detect_usb_ports.py --save
+  3. Config saved to ~/.dorobot_device.conf
+  4. run_so101.sh will automatically use these paths
         """,
     )
     parser.add_argument(
@@ -285,9 +483,26 @@ same paths even when:
         help="Output YAML configuration snippet",
     )
     parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Save device config to ~/.dorobot_device.conf (auto-loaded by run_so101.sh)",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Output path for --save (default: ~/.dorobot_device.conf)",
+    )
+    parser.add_argument(
         "--watch",
         action="store_true",
         help="Monitor device changes in real-time",
+    )
+    parser.add_argument(
+        "--chmod",
+        action="store_true",
+        help="Set chmod 777 on detected devices (requires sudo)",
     )
 
     args = parser.parse_args()
@@ -304,7 +519,12 @@ same paths even when:
         video = find_video_devices()
         serial = find_serial_devices()
 
-        if args.yaml:
+        if args.save:
+            save_device_config(video, serial, args.output, set_chmod=args.chmod)
+        elif args.chmod:
+            # Just chmod without saving
+            set_device_permissions(video, serial)
+        elif args.yaml:
             print_yaml_snippet(video, serial)
         else:
             print_devices(video, serial)

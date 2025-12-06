@@ -57,7 +57,9 @@ from dataclasses import asdict, dataclass
 from pprint import pformat
 
 import draccus
-import rerun as rr
+
+# Lazy import rerun - only needed if display_data is True
+rr = None
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig  # noqa: F401
@@ -84,7 +86,27 @@ from lerobot.teleoperators import (  # noqa: F401
 )
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
-from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
+
+# Lazy import rerun visualization utils - only needed if display_data is True
+_init_rerun = None
+log_rerun_data = None
+
+
+def _ensure_rerun_imported():
+    """Lazily import rerun and visualization utils when needed."""
+    global rr, _init_rerun, log_rerun_data
+    if rr is None:
+        try:
+            import rerun as _rr
+            from lerobot.utils.visualization_utils import _init_rerun as _init, log_rerun_data as _log
+            rr = _rr
+            _init_rerun = _init
+            log_rerun_data = _log
+        except ImportError as e:
+            raise ImportError(
+                "rerun is required for display_data=True. "
+                "Install it with: pip install rerun-sdk"
+            ) from e
 
 
 @dataclass
@@ -134,6 +156,7 @@ def teleoperate(cfg: TeleoperateConfig):
     init_logging()
     logging.info(pformat(asdict(cfg)))
     if cfg.display_data:
+        _ensure_rerun_imported()
         _init_rerun(session_name="teleoperation")
 
     teleop = make_teleoperator_from_config(cfg.teleop)

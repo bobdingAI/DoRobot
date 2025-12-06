@@ -29,6 +29,69 @@ ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 # Set CLOUD_OFFLOAD=0 to use local video encoding instead
 CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-1}"
 
+# ===========================================================================
+# DEVICE PORT CONFIGURATION
+# ===========================================================================
+# For stable operation, use persistent paths instead of numeric indices.
+#
+# OPTION 1: Create a device config file (RECOMMENDED)
+#   Run: python scripts/detect_usb_ports.py --save
+#   This creates ~/.dorobot_device.conf with your persistent paths
+#
+# OPTION 2: Set environment variables before running
+#   export CAMERA_TOP_PATH="/dev/v4l/by-path/..."
+#   export ARM_LEADER_PORT="/dev/serial/by-path/..."
+#
+# To find your persistent paths manually:
+#   python scripts/detect_usb_ports.py --yaml
+#
+# ===========================================================================
+
+# Device config file locations (checked in order)
+DEVICE_CONFIG_FILES=(
+    "$HOME/.dorobot_device.conf"
+    "/etc/dorobot/device.conf"
+    "$PROJECT_ROOT/.device.conf"
+)
+
+# Source device config if exists
+load_device_config() {
+    for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
+        if [ -f "$config_file" ]; then
+            log_info "Loading device config from: $config_file"
+            source "$config_file"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Try to load device config (before setting defaults)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load device config if available (silent at this point, logged later)
+for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+        LOADED_DEVICE_CONFIG="$config_file"
+        break
+    fi
+done
+
+# Default values (only used if not set by config file or environment)
+# Camera paths - use /dev/v4l/by-path/... for stability
+CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
+CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
+CAMERA_WRIST2_PATH="${CAMERA_WRIST2_PATH:-4}"
+
+# Arm ports - use /dev/serial/by-path/... or /dev/serial/by-id/... for stability
+ARM_LEADER_PORT="${ARM_LEADER_PORT:-/dev/ttyACM0}"
+ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-/dev/ttyACM1}"
+ARM_LEADER2_PORT="${ARM_LEADER2_PORT:-/dev/ttyACM2}"
+ARM_FOLLOWER2_PORT="${ARM_FOLLOWER2_PORT:-/dev/ttyACM3}"
+# ===========================================================================
+
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -118,6 +181,76 @@ setup_npu_env() {
             log_warn "NPU may not work correctly. Set ASCEND_TOOLKIT_PATH if needed."
         fi
     fi
+}
+
+# Export device port environment variables for DORA dataflow
+export_device_ports() {
+    log_step "Configuring device ports..."
+
+    # Log if config file was loaded
+    if [ -n "$LOADED_DEVICE_CONFIG" ]; then
+        log_info "Loaded device config from: $LOADED_DEVICE_CONFIG"
+    fi
+
+    # Export camera paths
+    export CAMERA_TOP_PATH
+    export CAMERA_WRIST_PATH
+    export CAMERA_WRIST2_PATH
+
+    # Export arm ports
+    export ARM_LEADER_PORT
+    export ARM_FOLLOWER_PORT
+    export ARM_LEADER2_PORT
+    export ARM_FOLLOWER2_PORT
+
+    # Log configuration
+    log_info "Camera configuration:"
+    log_info "  camera_top:   $CAMERA_TOP_PATH"
+    log_info "  camera_wrist: $CAMERA_WRIST_PATH"
+    log_info "Arm configuration:"
+    log_info "  leader:   $ARM_LEADER_PORT"
+    log_info "  follower: $ARM_FOLLOWER_PORT"
+
+    # Warn if using default indices (may be unstable)
+    if [[ "$CAMERA_TOP_PATH" =~ ^[0-9]+$ ]] || [[ "$CAMERA_WRIST_PATH" =~ ^[0-9]+$ ]]; then
+        log_warn "Using numeric camera indices - ports may change on restart!"
+        log_warn "For stability, create a device config file:"
+        log_warn "  python scripts/detect_usb_ports.py --save"
+    fi
+
+    if [[ "$ARM_LEADER_PORT" == /dev/ttyACM* ]] || [[ "$ARM_FOLLOWER_PORT" == /dev/ttyACM* ]]; then
+        log_warn "Using /dev/ttyACMx paths - ports may change on restart!"
+        log_warn "For stability, create a device config file:"
+        log_warn "  python scripts/detect_usb_ports.py --save"
+    fi
+}
+
+# Set device permissions to avoid permission denied errors
+set_device_permissions() {
+    log_step "Setting device permissions..."
+
+    # Set camera permissions
+    for cam_path in "$CAMERA_TOP_PATH" "$CAMERA_WRIST_PATH" "$CAMERA_WRIST2_PATH"; do
+        # Skip if it's a numeric index (not a path)
+        if [[ "$cam_path" =~ ^[0-9]+$ ]]; then
+            # Convert index to /dev/videoX
+            cam_path="/dev/video$cam_path"
+        fi
+        if [ -e "$cam_path" ]; then
+            sudo chmod 777 "$cam_path" 2>/dev/null && \
+                log_info "Set permissions for: $cam_path" || \
+                log_warn "Could not set permissions for: $cam_path"
+        fi
+    done
+
+    # Set arm serial port permissions
+    for arm_port in "$ARM_LEADER_PORT" "$ARM_FOLLOWER_PORT" "$ARM_LEADER2_PORT" "$ARM_FOLLOWER2_PORT"; do
+        if [ -e "$arm_port" ]; then
+            sudo chmod 777 "$arm_port" 2>/dev/null && \
+                log_info "Set permissions for: $arm_port" || \
+                log_warn "Could not set permissions for: $arm_port"
+        fi
+    done
 }
 
 # Cleanup function - called on exit
@@ -285,12 +418,28 @@ print_usage() {
     echo "  DORA_INIT_DELAY     Seconds to wait for DORA to initialize (default: 5)"
     echo "  SOCKET_TIMEOUT      Seconds to wait for ZeroMQ sockets (default: 30)"
     echo ""
+    echo "Device Port Configuration (for stable operation):"
+    echo "  CAMERA_TOP_PATH     Camera top path or index (default: 0)"
+    echo "  CAMERA_WRIST_PATH   Camera wrist path or index (default: 2)"
+    echo "  ARM_LEADER_PORT     Leader arm serial port (default: /dev/ttyACM0)"
+    echo "  ARM_FOLLOWER_PORT   Follower arm serial port (default: /dev/ttyACM1)"
+    echo ""
+    echo "  For stable ports, use persistent paths:"
+    echo "    CAMERA_TOP_PATH=\"/dev/v4l/by-path/platform-xxx-video-index0\""
+    echo "    ARM_LEADER_PORT=\"/dev/serial/by-path/platform-xxx-port0\""
+    echo ""
+    echo "  Find your persistent paths with:"
+    echo "    python scripts/detect_usb_ports.py --yaml"
+    echo ""
     echo "Examples:"
     echo "  $0                              # Default: cloud mode + NPU enabled"
     echo "  REPO_ID=my-dataset $0           # Custom dataset name"
     echo ""
     echo "  # Disable cloud mode (use local video encoding):"
     echo "  CLOUD_OFFLOAD=0 $0"
+    echo ""
+    echo "  # With persistent device paths (recommended for stability):"
+    echo "  CAMERA_TOP_PATH=\"/dev/v4l/by-path/...\" ARM_LEADER_PORT=\"/dev/serial/by-path/...\" $0"
     echo ""
     echo "  # Disable NPU (for non-Ascend hardware):"
     echo "  USE_NPU=0 $0"
@@ -327,6 +476,12 @@ main() {
 
     # Step 0.5: Setup NPU environment if needed
     setup_npu_env
+
+    # Step 0.6: Export device port configuration
+    export_device_ports
+
+    # Step 0.7: Set device permissions
+    set_device_permissions
 
     # Step 1: Clean up stale sockets
     cleanup_stale_sockets

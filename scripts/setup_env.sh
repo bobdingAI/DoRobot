@@ -307,11 +307,10 @@ main() {
     log_step "Ensuring OpenCV with GUI support..."
     pip install opencv-python
 
-    # Step 8: Install Rerun visualization tool
-    log_step "Installing Rerun SDK..."
-    pip install rerun-sdk
+    # Note: Rerun SDK is optional - only needed for visualization
+    # Install manually if needed: pip install rerun-sdk
 
-    # Step 9: Install system dependencies (Linux only)
+    # Step 8: Install system dependencies (Linux only)
     if [ "$(uname)" == "Linux" ]; then
         log_step "Installing Linux system dependencies..."
 
@@ -441,13 +440,6 @@ main() {
         :
     else
         log_warn "ZeroMQ import failed"
-    fi
-
-    # Check Rerun
-    if python -c "import rerun; print(f'  Rerun: {rerun.__version__}')" 2>/dev/null; then
-        :
-    else
-        log_warn "Rerun import failed"
     fi
 
     echo ""

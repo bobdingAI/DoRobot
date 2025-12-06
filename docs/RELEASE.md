@@ -4,6 +4,364 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.49 (2025-12-05) - Fix USB Video Device Detection
+
+### Summary
+Fixed `detect_usb_ports.py` not detecting video devices on Orange Pi and other systems where OpenCV can't open cameras directly.
+
+### Problem
+The script used OpenCV (`cv2.VideoCapture`) to verify video devices, which failed on Orange Pi even though the cameras work with other tools.
+
+### Solution
+Replace OpenCV-based detection with v4l2-ctl and udevadm-based detection:
+1. Try `v4l2-ctl --device=/dev/videoX --all` to check for "Video Capture" capability
+2. Fallback to `udevadm info` to check `ID_V4L_CAPABILITIES`
+3. Final fallback: check if device exists and is readable
+
+### Changes
+
+**File: `scripts/detect_usb_ports.py`**
+- Added `is_video_capture_device()` function using v4l2-ctl/udevadm
+- Removed OpenCV dependency from video device detection
+- More reliable detection on embedded systems
+
+---
+
+## v0.2.48 (2025-12-05) - Fix OpenCV GUI Support with conda-forge
+
+### Summary
+Fixed OpenCV GUI display issues by using conda-forge's OpenCV instead of pip's opencv-python.
+
+### Problem
+On systems with GUI display, running data collection fails with:
+```
+cv2.error: OpenCV(4.12.0) error: (-2:Unspecified error) The function is not implemented.
+Rebuild the library with Windows, GTK+ 2.x or Cocoa support.
+```
+
+### Root Cause
+The pip-installed `opencv-python` package has ffmpeg/PyAV version conflicts that cause `cv2.imshow` to hang or fail. This is a known issue in the LeRobot community (see [huggingface/lerobot#520](https://github.com/huggingface/lerobot/issues/520)).
+
+### Solution
+Use conda-forge's OpenCV package instead of pip's opencv-python. This is the proven solution from the LeRobot community:
+
+```bash
+conda install -y -c conda-forge ffmpeg
+pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python
+conda install -y -c conda-forge "opencv>=4.10.0"
+```
+
+### Changes
+
+**File: `scripts/setup_env.sh`**
+- Step 8: Install ffmpeg and OpenCV from conda-forge instead of pip
+
+**File: `scripts/setup_env_base.sh`**
+- Step 7: Install ffmpeg and OpenCV from conda-forge instead of pip
+
+### Immediate Fix (for existing installations)
+
+```bash
+conda install -y -c conda-forge ffmpeg
+pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python
+conda install -y -c conda-forge "opencv>=4.10.0"
+```
+
+---
+
+## v0.2.47 (2025-12-05) - Fix PyTorch/torchvision Version Conflicts
+
+### Summary
+Fixed PyTorch version conflicts caused by `lerobot[feetech]` or other packages installing incompatible torchvision versions.
+
+### Problem
+After running `pip install -e .` and `pip install 'lerobot[feetech]'`, the torchvision version gets overwritten to an incompatible version, causing runtime errors:
+```
+RuntimeError: operator torchvision::nms does not exist. We performed an exhaustive search over all registered ops, but could not find it. ...
+This could be a bug in PyTorch which might occur if torchvision is installed with a different version of PyTorch.
+```
+
+### Root Cause
+The `lerobot[feetech]` package (and possibly other dependencies) specifies torchvision constraints that override the manually installed `torchvision==0.20.1` with an incompatible version that doesn't match `torch==2.5.1`.
+
+### Solution
+Added Step 9.5 (in `setup_env.sh`) / Step 8.5 (in `setup_env_base.sh`) to reinstall the correct PyTorch versions **after** all other packages are installed:
+- `torch==2.5.1`
+- `torchvision==0.20.1`
+- `torchaudio==2.5.1`
+- `torch-npu==2.5.1` (if NPU mode)
+
+This ensures version compatibility is maintained regardless of what other packages try to install.
+
+### Changes
+
+**File: `scripts/setup_env.sh`**
+- Added Step 9.5: Reinstall PyTorch after all packages installed
+- Reinstall torch-npu if using NPU device
+
+**File: `scripts/setup_env_base.sh`**
+- Added Step 8.5: Same fix for base environment setup script
+
+### Impact
+- NPU inference now works correctly with `torch-npu==2.5.1`
+- No more `operator torchvision::nms does not exist` errors
+- Package installation order no longer matters
+
+---
+
+## v0.2.46 (2025-12-05) - Fix OpenCV Crash on Headless Exit
+
+### Summary
+Fixed crash when pressing 'e' to exit on headless systems, which was preventing video encoding.
+
+### Problem
+On headless systems without GUI support (like OpenEuler embedded), `cv2.destroyAllWindows()` throws an exception:
+```
+OpenCV(4.12.0) error: (-2:Unspecified error) The function is not implemented. Rebuild the library with Windows, GTK+ 2.x or Cocoa support.
+```
+This exception caused the entire exit sequence to abort, skipping video encoding and leaving no `videos/` folder.
+
+### Solution
+Wrap OpenCV cleanup calls in try-except to gracefully handle headless systems. The error is logged at debug level and doesn't interrupt the save/encode workflow.
+
+### Changes
+
+**File: `operating_platform/core/main.py`**
+- Wrap `cv2.destroyAllWindows()` in try-except at exit path
+- Wrap `cv2.destroyAllWindows()` in try-except during reset abort
+- Add terminal keyboard cleanup in abort path
+- Log OpenCV errors at debug level (not error) since they're expected on headless
+
+---
+
+## v0.2.45 (2025-12-05) - Device Config File for Stable USB Ports
+
+### Summary
+Added automatic device configuration file support to solve USB/camera port instability between sessions.
+
+### Problem
+USB device paths (`/dev/video0`, `/dev/ttyACM0`) can change between recording sessions, inference runs, or reboots. This causes the system to connect to wrong cameras or arms.
+
+### Solution
+Added support for a device configuration file (`~/.dorobot_device.conf`) that stores persistent USB paths based on physical port location. This file is automatically loaded by `run_so101.sh`.
+
+### Changes
+
+**File: `scripts/detect_usb_ports.py`**
+- Added `--save` option to generate device config file
+- Added `--output` option to specify custom output path
+- New `save_device_config()` function creates shell-sourceable config
+
+**File: `scripts/run_so101.sh`**
+- Added device config file loading (checks multiple locations)
+- Config file locations (in order): `~/.dorobot_device.conf`, `/etc/dorobot/device.conf`, `$PROJECT_ROOT/.device.conf`
+- Logs when config file is loaded
+- Updated warnings to suggest `--save` option
+
+### Workflow for Stable Ports
+
+```bash
+# 1. Connect all devices (cameras, arms) in your desired configuration
+# 2. Run detection script to save persistent paths:
+python scripts/detect_usb_ports.py --save
+
+# 3. Config file created at ~/.dorobot_device.conf
+# 4. run_so101.sh will automatically load this config
+bash scripts/run_so101.sh
+```
+
+### Generated Config File Example
+
+```bash
+# ~/.dorobot_device.conf
+# DoRobot Device Configuration
+# Generated by: python scripts/detect_usb_ports.py --save
+
+# === Camera Configuration ===
+# /dev/video0 - USB_Camera
+CAMERA_TOP_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:1:1.0-video-index0"
+
+# /dev/video2 - USB_Camera
+CAMERA_WRIST_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:2:1.0-video-index0"
+
+# === Arm Configuration ===
+# /dev/ttyACM0 - Feetech_Motor
+ARM_LEADER_PORT="/dev/serial/by-path/platform-xhci-hcd.0-usb-0:3:1.0"
+
+# /dev/ttyACM1 - Feetech_Motor
+ARM_FOLLOWER_PORT="/dev/serial/by-path/platform-xhci-hcd.0-usb-0:4:1.0"
+```
+
+### Benefits
+- Ports remain stable across reboots
+- No need to reconnect devices in specific order
+- One-time setup per device
+- Works with both data collection and inference
+
+---
+
+## v0.2.44 (2025-12-05) - Terminal Keyboard Input for Headless Mode
+
+### Summary
+Added terminal-based keyboard input for headless systems without GUI. When `SHOW=0`, users can now press 'n', 'p', 'e' keys in the terminal to control recording.
+
+### Problem
+When running on headless systems (OpenEuler embedded, no GUI), `cv2.waitKey()` cannot capture keyboard input because it requires an OpenCV window. This made it impossible to interact with the recording system when `SHOW=0`.
+
+### Solution
+Added `TerminalKeyboard` class that uses `termios` to read raw keyboard input directly from the terminal (stdin) without requiring a GUI window.
+
+### Changes
+
+**New File: `operating_platform/utils/keyboard_input.py`**
+- `TerminalKeyboard` class for non-blocking terminal keyboard input
+- Uses `termios` and `select` for raw input on Linux/macOS
+- `get_key_headless()` function as drop-in replacement for `cv2.waitKey()`
+
+**File: `operating_platform/core/main.py`**
+- Initialize terminal keyboard when `show_display=False`
+- Use `get_key_headless()` instead of `cv2.waitKey()` in headless mode
+- Proper cleanup of terminal keyboard on exit
+
+### Usage
+```bash
+# Run in headless mode - keyboard input works in terminal
+SHOW=0 bash scripts/run_so101.sh
+
+# Press 'n' to save episode
+# Press 'p' to proceed after reset
+# Press 'e' to exit
+```
+
+### Notes
+- Terminal must be a TTY (not piped input)
+- Works on Linux and macOS
+- Falls back gracefully if termios not available (Windows)
+
+---
+
+## v0.2.43 (2025-12-05) - Add LeRobot Feetech Support
+
+### Summary
+Added `lerobot[feetech]` installation to setup scripts for Feetech motor support.
+
+### Changes
+
+**Files: `scripts/setup_env.sh`, `scripts/setup_env_base.sh`**
+- Added `pip install 'lerobot[feetech]'` step after SO101 arm component installation
+- Re-numbered subsequent installation steps
+
+---
+
+## v0.2.42 (2025-12-05) - Always Start Fresh Dataset
+
+### Summary
+Changed data collection to always clear existing dataset directory on startup, preventing errors from corrupted/incomplete datasets from previous interrupted sessions.
+
+### Problem
+When the data collection script crashes or is interrupted, it may leave incomplete dataset files (e.g., missing `meta/tasks.jsonl`). On restart, the script would try to resume from this corrupted state, causing errors like:
+```
+FileNotFoundError: No such file or directory: '.../meta/tasks.jsonl'
+```
+
+### Solution
+Always remove existing dataset directory and start fresh on each run. This ensures a clean slate without corrupted metadata.
+
+### Changes
+
+**File: `operating_platform/core/main.py`**
+- Removed resume logic that checked for existing data
+- Always clear existing dataset directory if non-empty
+- Start fresh recording session every time
+
+### Impact
+- No more errors from corrupted/incomplete datasets
+- Each `run_so101.sh` invocation starts with a clean dataset
+- Previous data in the same repo_id will be deleted (use different REPO_ID to preserve old data)
+
+### Usage Note
+If you want to preserve data from a previous session, use a different `REPO_ID`:
+```bash
+REPO_ID=my-dataset-v2 bash scripts/run_so101.sh
+```
+
+---
+
+## v0.2.41 (2025-12-05) - Add SHOW Parameter and Change CLOUD_OFFLOAD Default
+
+### Summary
+Added `SHOW` parameter for headless operation and changed `CLOUD_OFFLOAD` default to `0` (local encoding).
+
+### Changes
+
+**File: `scripts/run_so101.sh`**
+- Changed `CLOUD_OFFLOAD` default from `1` to `0` (local encoding by default)
+- Added `SHOW` parameter (default: `1`, set to `0` for headless systems)
+- Updated help text and examples
+
+**File: `operating_platform/core/record.py`**
+- Added `display` field to `RecordConfig` (default: `True`)
+
+**File: `operating_platform/core/main.py`**
+- Use `show_display` flag that combines user setting with headless detection
+- Conditionally create `CameraDisplay` only when display is enabled
+- Updated all display loops to check `show_display`
+
+**File: `README.md`**
+- Updated environment variables documentation
+- Added data collection examples with mode combinations
+- Added mode summary table
+
+### Usage Examples
+
+```bash
+# Default: Local encoding with camera display (NPU enabled)
+bash scripts/run_so101.sh
+
+# Headless mode (no camera display)
+SHOW=0 bash scripts/run_so101.sh
+
+# Cloud mode (upload to cloud for encoding)
+CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+
+# Headless + cloud mode
+SHOW=0 CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+```
+
+### Mode Summary
+
+| SHOW | CLOUD_OFFLOAD | Result |
+|------|---------------|--------|
+| 1 | 0 | Camera display + local NPU encoding (default) |
+| 0 | 0 | Headless + local NPU encoding |
+| 1 | 1 | Camera display + cloud upload |
+| 0 | 1 | Headless + cloud upload |
+
+---
+
+## v0.2.40 (2025-12-04) - Fix PyTorch Install for ARM64/aarch64
+
+### Summary
+Fixed PyTorch installation on ARM64 architecture (Orange Pi, aarch64, OpenEuler).
+
+### Problem
+PyTorch CPU index (`https://download.pytorch.org/whl/cpu`) doesn't have ARM64 builds for version 2.5.1. The script failed with:
+```
+ERROR: Could not find a version that satisfies the requirement torch==2.5.1
+```
+
+### Solution
+Detect architecture and use PyPI directly for ARM64 (which has ARM64 wheels), while keeping the CPU index for x86_64.
+
+### Changes
+
+**Files: `scripts/setup_env.sh`, `scripts/setup_env_base.sh`**
+- Detect architecture with `uname -m`
+- ARM64/aarch64: Install from PyPI directly (no `--index-url`)
+- x86_64: Continue using `--index-url https://download.pytorch.org/whl/cpu`
+
+---
+
 ## v0.2.39 (2025-12-04) - Disable Update Repos During Install
 
 ### Summary

@@ -2,27 +2,25 @@
 # DORA Teleoperate Dataflow for SO101 Robot
 # ===========================================================================
 #
-# IMPORTANT: Port Configuration
-# -----------------------------
-# By default, devices are configured with numeric indices (0, 2, etc.).
-# These indices can CHANGE when:
-#   - Starting a new episode
-#   - Reconnecting USB cables
-#   - Rebooting the system
+# PORT CONFIGURATION
+# ------------------
+# Ports are configured via environment variables for stability.
+# Set these in your shell or run_so101.sh before starting:
 #
-# For STABLE port assignments, use persistent paths:
+#   # Cameras (use persistent paths for stability)
+#   export CAMERA_TOP_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:1:1.0-video-index0"
+#   export CAMERA_WRIST_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:2:1.0-video-index0"
 #
-#   Cameras: Use /dev/v4l/by-path/... paths
-#   Arms:    Use /dev/serial/by-path/... or /dev/serial/by-id/... paths
+#   # Arms (use persistent paths for stability)
+#   export ARM_LEADER_PORT="/dev/serial/by-path/platform-xhci-hcd.0-usb-0:3:1.0"
+#   export ARM_FOLLOWER_PORT="/dev/serial/by-path/platform-xhci-hcd.0-usb-0:4:1.0"
 #
 # To find your persistent paths, run:
 #   python scripts/detect_usb_ports.py --yaml
 #
-# Example persistent camera path:
-#   CAPTURE_PATH: "/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:1:1.0-video-index0"
-#
-# Example persistent serial path:
-#   PORT: "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:2:1.0"
+# If env vars are not set, defaults will be used (may be unstable):
+#   CAMERA_TOP_PATH=0, CAMERA_WRIST_PATH=2
+#   ARM_LEADER_PORT=/dev/ttyACM0, ARM_FOLLOWER_PORT=/dev/ttyACM1
 #
 # ===========================================================================
 
@@ -34,9 +32,8 @@ nodes:
     outputs:
       - image
     env:
-      # Use numeric index (may change) or persistent path (stable):
-      # CAPTURE_PATH: "/dev/v4l/by-path/platform-xxx-video-index0"
-      CAPTURE_PATH: 0
+      # Set CAMERA_TOP_PATH env var for persistent path, or uses default
+      CAPTURE_PATH: $CAMERA_TOP_PATH
       IMAGE_WIDTH: 640
       IMAGE_HEIGHT: 480
 
@@ -47,9 +44,8 @@ nodes:
     outputs:
       - image
     env:
-      # Use numeric index (may change) or persistent path (stable):
-      # CAPTURE_PATH: "/dev/v4l/by-path/platform-xxx-video-index0"
-      CAPTURE_PATH: 2
+      # Set CAMERA_WRIST_PATH env var for persistent path, or uses default
+      CAPTURE_PATH: $CAMERA_WRIST_PATH
       IMAGE_WIDTH: 640
       IMAGE_HEIGHT: 480
 
@@ -60,7 +56,7 @@ nodes:
   #   outputs:
   #     - image
   #   env:
-  #     CAPTURE_PATH: 4
+  #     CAPTURE_PATH: $CAMERA_WRIST2_PATH
   #     IMAGE_WIDTH: 640
   #     IMAGE_HEIGHT: 480
 
@@ -72,10 +68,8 @@ nodes:
       - joint
     env:
       GET_DEVICE_FROM: PORT
-      # Use direct path (may change) or persistent path (stable):
-      # PORT: "/dev/serial/by-path/platform-xxx-port0"
-      # PORT: "/dev/serial/by-id/usb-xxx"
-      PORT: /dev/ttyACM0
+      # Set ARM_LEADER_PORT env var for persistent path, or uses default
+      PORT: $ARM_LEADER_PORT
       ARM_NAME: SO101-leader
       ARM_ROLE: leader
       CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
@@ -90,10 +84,8 @@ nodes:
       - joint
     env:
       GET_DEVICE_FROM: PORT
-      # Use direct path (may change) or persistent path (stable):
-      # PORT: "/dev/serial/by-path/platform-xxx-port0"
-      # PORT: "/dev/serial/by-id/usb-xxx"
-      PORT: /dev/ttyACM1
+      # Set ARM_FOLLOWER_PORT env var for persistent path, or uses default
+      PORT: $ARM_FOLLOWER_PORT
       ARM_NAME: SO101-follower
       ARM_ROLE: follower
       CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
@@ -106,7 +98,7 @@ nodes:
   #     - joint
   #   env:
   #     GET_DEVICE_FROM: PORT
-  #     PORT: /dev/ttyACM2
+  #     PORT: $ARM_LEADER2_PORT
   #     ARM_NAME: SO101-leader2
   #     ARM_ROLE: leader
   #     CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
@@ -121,7 +113,7 @@ nodes:
   #     - joint
   #   env:
   #     GET_DEVICE_FROM: PORT
-  #     PORT: /dev/ttyACM3
+  #     PORT: $ARM_FOLLOWER2_PORT
   #     ARM_NAME: SO101-follower2
   #     ARM_ROLE: follower
   #     CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
