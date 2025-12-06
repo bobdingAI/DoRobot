@@ -4,6 +4,51 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.60 (2025-12-06) - Launcher Improvements & Permission Fixes
+
+### Summary
+Added version display, improved controls documentation, fixed serial port permissions for both ttyACM0 and ttyACM1, and added permission validation before starting.
+
+### Changes
+
+**run_so101.sh**
+1. Added version display in launcher header
+2. Added missing controls to display:
+   - 'p' - Proceed after robot reset
+   - Ctrl+C - Emergency stop and exit
+3. Added `check_device_permissions()` function that validates serial port permissions (777) before "All systems ready"
+4. If permissions are wrong, shows clear error message with fix instructions and exits
+
+**detect_usb_ports.py**
+1. `set_device_permissions()` now always includes default devices:
+   - `/dev/video0`, `/dev/video2`
+   - `/dev/ttyACM0`, `/dev/ttyACM1`
+2. Added `sudo usermod -aG dialout $USER` for serial port group access
+3. Shows step-by-step progress (1/2: usermod, 2/2: chmod)
+
+### Permission Check Output
+
+When permissions are correct:
+```
+[STEP] Checking device permissions...
+[INFO] Permission OK: /dev/ttyACM0 (777)
+[INFO] Permission OK: /dev/ttyACM1 (777)
+[INFO] All device permissions OK
+```
+
+When permissions are wrong:
+```
+[ERROR] Permission denied: /dev/ttyACM1 (current: 660, required: 777)
+
+[ERROR] ==========================================
+[ERROR]   PERMISSION ERROR - Cannot continue
+[ERROR] ==========================================
+
+Please run: bash scripts/detect.sh
+```
+
+---
+
 ## v0.2.58 (2025-12-06) - Fixed Default Device Paths
 
 ### Summary

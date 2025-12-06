@@ -260,42 +260,67 @@ def print_yaml_snippet(video_devices: list, serial_devices: list):
 
 def set_device_permissions(video_devices: list, serial_devices: list):
     """
-    Set chmod 777 on all detected devices using sudo.
+    Set chmod 777 on all detected devices and default device paths using sudo.
+    Also adds user to dialout group for serial port access.
     """
     devices_to_chmod = []
 
-    # Collect video device paths
+    # Always include default device paths (even if not detected)
+    default_devices = [
+        "/dev/video0",
+        "/dev/video2",
+        "/dev/ttyACM0",
+        "/dev/ttyACM1",
+    ]
+
+    for dev_path in default_devices:
+        if dev_path not in devices_to_chmod:
+            devices_to_chmod.append(dev_path)
+
+    # Collect detected video device paths
     for dev in video_devices:
-        path = dev.get("by_path_link") or dev["path"]
-        devices_to_chmod.append(path)
-        # Also add the raw /dev/videoX path
         if dev["path"] not in devices_to_chmod:
             devices_to_chmod.append(dev["path"])
 
-    # Collect serial device paths
+    # Collect detected serial device paths
     for dev in serial_devices:
-        path = dev.get("by_path_link") or dev.get("by_id_link") or dev["path"]
-        devices_to_chmod.append(path)
-        # Also add the raw /dev/ttyACMx path
         if dev["path"] not in devices_to_chmod:
             devices_to_chmod.append(dev["path"])
-
-    if not devices_to_chmod:
-        print("No devices to set permissions for.")
-        return
 
     print(f"\n{'=' * 70}")
-    print("Setting device permissions (chmod 777)...")
+    print("Setting device permissions...")
     print(f"{'=' * 70}")
 
-    # Build chmod command for all devices at once
+    # Step 1: Add user to dialout group for serial port access
+    print("\n[1/2] Adding user to dialout group for serial port access...")
+    try:
+        user = os.environ.get("USER", "")
+        if user:
+            cmd = ["sudo", "usermod", "-aG", "dialout", user]
+            print(f"Running: sudo usermod -aG dialout {user}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"User '{user}' added to dialout group.")
+                print("Note: You may need to log out and log back in for group changes to take effect.")
+            else:
+                print(f"Warning: usermod failed: {result.stderr}")
+        else:
+            print("Warning: Could not determine current user.")
+    except Exception as e:
+        print(f"Error adding user to dialout group: {e}")
+
+    # Step 2: Set chmod 777 on devices
+    print("\n[2/2] Setting chmod 777 on devices...")
+
+    # Filter to existing devices only
     existing_devices = [d for d in devices_to_chmod if os.path.exists(d)]
 
     if not existing_devices:
         print("No existing device paths found.")
+        print(f"{'=' * 70}\n")
         return
 
-    print(f"Devices to chmod: {len(existing_devices)}")
+    print(f"Devices to chmod ({len(existing_devices)}):")
     for dev in existing_devices:
         print(f"  - {dev}")
 

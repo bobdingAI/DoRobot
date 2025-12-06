@@ -16,6 +16,9 @@
 
 set -e
 
+# Version
+VERSION="0.2.59"
+
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
 
@@ -253,6 +256,53 @@ set_device_permissions() {
     done
 }
 
+# Check device permissions before starting - exit with error if not 777
+check_device_permissions() {
+    log_step "Checking device permissions..."
+
+    local permission_error=0
+
+    # Check serial port permissions (most critical)
+    for arm_port in "$ARM_LEADER_PORT" "$ARM_FOLLOWER_PORT"; do
+        if [ -e "$arm_port" ]; then
+            # Get permissions (e.g., "crw-rw-rw-" for 666, "crwxrwxrwx" for 777)
+            local perms=$(stat -c "%a" "$arm_port" 2>/dev/null || stat -f "%Lp" "$arm_port" 2>/dev/null)
+            if [ "$perms" != "777" ]; then
+                log_error "Permission denied: $arm_port (current: $perms, required: 777)"
+                permission_error=1
+            else
+                log_info "Permission OK: $arm_port (777)"
+            fi
+        else
+            log_warn "Device not found: $arm_port"
+        fi
+    done
+
+    if [ $permission_error -eq 1 ]; then
+        echo ""
+        log_error "=========================================="
+        log_error "  PERMISSION ERROR - Cannot continue"
+        log_error "=========================================="
+        echo ""
+        log_error "Serial port permissions are not set correctly."
+        log_error "Please run the following command to fix permissions:"
+        echo ""
+        echo "    bash scripts/detect.sh"
+        echo ""
+        log_error "Or manually run:"
+        echo "    sudo chmod 777 /dev/ttyACM0 /dev/ttyACM1"
+        echo "    sudo usermod -aG dialout \$USER"
+        echo ""
+        log_error "After running detect.sh, you may need to:"
+        log_error "  1. Unplug and replug the USB devices"
+        log_error "  2. Or log out and log back in"
+        echo ""
+        exit 1
+    fi
+
+    log_info "All device permissions OK"
+}
+
 # Cleanup function - called on exit
 cleanup() {
     log_step "Cleaning up..."
@@ -466,6 +516,7 @@ main() {
     echo ""
     echo "=========================================="
     echo "  SO101 Robot Data Collection Launcher"
+    echo "  Version: $VERSION"
     echo "=========================================="
     echo ""
 
@@ -503,19 +554,26 @@ main() {
     done
     echo ""
 
+    # Step 3.6: Final permission check before starting
+    check_device_permissions
+
     echo ""
     log_info "All systems ready!"
     echo ""
     echo "=========================================="
     echo "  Controls:"
-    echo "    'n' - Save episode and start new one"
+    echo "    'n'     - Save episode and start new one"
+    echo "    'p'     - Proceed after robot reset"
     if [ "$CLOUD_OFFLOAD" == "1" ]; then
-        echo "    'e' - Stop, upload to cloud, and train"
-        echo ""
+        echo "    'e'     - Stop, upload to cloud, and train"
+    else
+        echo "    'e'     - Stop recording and exit"
+    fi
+    echo "    Ctrl+C  - Emergency stop and exit"
+    echo ""
+    if [ "$CLOUD_OFFLOAD" == "1" ]; then
         echo "  Mode: Cloud Offload (default)"
     else
-        echo "    'e' - Stop recording and exit"
-        echo ""
         echo "  Mode: Local Encoding"
     fi
     echo "=========================================="
