@@ -4,6 +4,52 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.58 (2025-12-06) - Fixed Default Device Paths
+
+### Summary
+Changed detect.sh to use fixed default device paths for single-arm systems. Users plug devices in a specific order to get consistent assignments.
+
+### Device Plug Order
+Plug devices in this order for correct assignment:
+1. **Top camera** → `/dev/video0`
+2. **Wrist camera** → `/dev/video2`
+3. **Leader arm** → `/dev/ttyACM0`
+4. **Follower arm** → `/dev/ttyACM1`
+
+### Changes
+
+**scripts/detect_usb_ports.py**
+- Use fixed default paths instead of dynamic detection
+- Simplified for single-arm system (removed ARM_LEADER2/FOLLOWER2)
+- Config header now includes plug order instructions
+- Detected devices shown as comments for reference
+
+### Generated Config Example
+
+```bash
+# IMPORTANT: Plug devices in this order for correct assignment:
+#   1. Top camera    -> /dev/video0
+#   2. Wrist camera  -> /dev/video2
+#   3. Leader arm    -> /dev/ttyACM0
+#   4. Follower arm  -> /dev/ttyACM1
+
+# === Camera Configuration ===
+CAMERA_TOP_PATH="/dev/video0"
+CAMERA_WRIST_PATH="/dev/video2"
+
+# === Arm Configuration (Single Arm System) ===
+ARM_LEADER_PORT="/dev/ttyACM0"
+ARM_FOLLOWER_PORT="/dev/ttyACM1"
+
+# === Detected Devices (for reference) ===
+# Video: /dev/video0 - DSJ-2062-309
+# Video: /dev/video2 - DSJ-2062-309
+# Serial: /dev/ttyACM0 - USB Single Serial
+# Serial: /dev/ttyACM1 - USB Single Serial
+```
+
+---
+
 ## v0.2.57 (2025-12-06) - Setup Script Update Mode & Lazy Rerun Imports
 
 ### Summary
