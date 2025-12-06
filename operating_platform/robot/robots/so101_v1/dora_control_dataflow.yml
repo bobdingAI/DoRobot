@@ -1,3 +1,27 @@
+# ===========================================================================
+# DORA Control Dataflow for SO101 Robot (Inference Mode)
+# ===========================================================================
+#
+# This dataflow is used for inference/control mode (no leader arm).
+# It uses the SAME environment variables as dora_teleoperate_dataflow.yml
+# to ensure port consistency between data collection and inference.
+#
+# PORT CONFIGURATION
+# ------------------
+# Set these environment variables before starting:
+#
+#   # Cameras (use persistent paths for stability)
+#   export CAMERA_TOP_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:1:1.0-video-index0"
+#   export CAMERA_WRIST_PATH="/dev/v4l/by-path/platform-xhci-hcd.0-usb-0:2:1.0-video-index0"
+#
+#   # Follower arm only (no leader in inference mode)
+#   export ARM_FOLLOWER_PORT="/dev/serial/by-path/platform-xhci-hcd.0-usb-0:4:1.0"
+#
+# To find your persistent paths, run:
+#   python scripts/detect_usb_ports.py --yaml
+#
+# ===========================================================================
+
 nodes:
   - id: camera_top
     path: ../../components/camera_opencv/main.py
@@ -6,7 +30,8 @@ nodes:
     outputs:
       - image
     env:
-      CAPTURE_PATH: 0
+      # Same env var as teleoperate dataflow for consistency
+      CAPTURE_PATH: $CAMERA_TOP_PATH
       IMAGE_WIDTH: 640
       IMAGE_HEIGHT: 480
 
@@ -17,7 +42,8 @@ nodes:
     outputs:
       - image
     env:
-      CAPTURE_PATH: 2
+      # Same env var as teleoperate dataflow for consistency
+      CAPTURE_PATH: $CAMERA_WRIST_PATH
       IMAGE_WIDTH: 640
       IMAGE_HEIGHT: 480
 
@@ -30,7 +56,8 @@ nodes:
       - joint
     env:
       GET_DEVICE_FROM: PORT
-      PORT: /dev/ttyACM1
+      # Same env var as teleoperate dataflow for consistency
+      PORT: $ARM_FOLLOWER_PORT
       ARM_NAME: SO101-follower
       ARM_ROLE: follower
       CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
