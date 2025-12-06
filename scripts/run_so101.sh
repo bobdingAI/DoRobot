@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.59"
+VERSION="0.2.61"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -27,10 +27,9 @@ CONDA_ENV="${CONDA_ENV:-dorobot}"
 USE_NPU="${USE_NPU:-1}"
 ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
-# Cloud Offload Configuration - enabled by default (recommended workflow)
-# When enabled, raw images are kept and uploaded to cloud for encoding/training
-# Set CLOUD_OFFLOAD=0 to use local video encoding instead
-CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-1}"
+# Cloud Offload Configuration - disabled by default (local encoding)
+# Set CLOUD_OFFLOAD=1 to upload raw images to cloud for encoding/training
+CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
 
 # ===========================================================================
 # DEVICE PORT CONFIGURATION

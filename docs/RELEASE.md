@@ -4,6 +4,35 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.61 (2025-12-06) - Default Settings & Auto Dataset Cleanup
+
+### Summary
+Changed default settings and added automatic dataset folder cleanup at start.
+
+### Changes
+
+**run_so101.sh**
+- `CLOUD_OFFLOAD` default changed from `1` to `0` (local encoding by default)
+- `USE_NPU` remains `1` by default (NPU enabled)
+
+**operating_platform/core/main.py**
+- Dataset folder is now always cleared at start of data collection
+- Users no longer need to manually delete old data
+- Prevents issues with incomplete/corrupted data from previous runs
+
+### Default Mode
+```
+USE_NPU=1         # NPU enabled (for Ascend hardware)
+CLOUD_OFFLOAD=0   # Local encoding (default)
+```
+
+To enable cloud mode:
+```bash
+CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+```
+
+---
+
 ## v0.2.60 (2025-12-06) - Launcher Improvements & Permission Fixes
 
 ### Summary

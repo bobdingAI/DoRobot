@@ -198,21 +198,16 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     # Check if cloud_offload mode is enabled
     cloud_offload = getattr(cfg.record, 'cloud_offload', False)
 
-    # 检查恢复模式（更健壮的路径检查）
+    # Always clear existing data to start fresh
+    # This prevents issues with incomplete/corrupted data from previous runs
+    # Users don't need to manually clean up the dataset folder
     resume = False
     if any(target_dir.iterdir()):  # 检查目录是否非空
-        if cloud_offload:
-            # In cloud offload mode, clear existing data to start fresh
-            # This prevents issues with incomplete/corrupted data from previous runs
-            import shutil
-            logging.warning(f"Cloud offload mode: Clearing existing data in {target_dir}")
-            shutil.rmtree(target_dir)
-            target_dir.mkdir(parents=True, exist_ok=True)
-            logging.info(f"Starting fresh recording session in: {target_dir}")
-            resume = False
-        else:
-            resume = True
-            logging.info(f"Resuming recording in existing directory: {target_dir}")
+        import shutil
+        logging.warning(f"Clearing existing data in {target_dir}")
+        shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Starting fresh recording session in: {target_dir}")
     else:
         logging.info(f"Starting new recording session in: {target_dir}")
 
