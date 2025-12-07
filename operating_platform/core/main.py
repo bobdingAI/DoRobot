@@ -349,8 +349,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             observation = daemon.get_observation()
 
             # 显示图像（仅在非无头模式）- 使用统一相机窗口
-            # Update current_episode dynamically to show correct episode number
-            current_episode = record.dataset.meta.total_episodes
+            # Get current episode from the episode buffer (pre-allocated index)
+            current_episode = record.dataset.episode_buffer.get("episode_index", 0)
             if observation and not is_headless():
                 key = camera_display.show(observation, episode_index=current_episode, status="Recording")
             else:
@@ -390,8 +390,9 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     observation = daemon.get_observation()
 
                     # Show reset view with status
+                    # Get next episode index from the new buffer (allocated after save)
                     if observation and not is_headless():
-                        next_episode = record.dataset.meta.total_episodes
+                        next_episode = record.dataset.episode_buffer.get("episode_index", 0)
                         key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press P")
                     else:
                         key = cv2.waitKey(10)
@@ -488,7 +489,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     logging.info("Reset timeout - auto-proceeding to next episode")
 
                 # Voice prompt: recording new episode
-                next_episode = record.dataset.meta.total_episodes
+                next_episode = record.dataset.episode_buffer.get("episode_index", 0)
                 log_say(f"Recording episode {next_episode}.", play_sounds=True)
 
                 break  # Break to restart episode loop

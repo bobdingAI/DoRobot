@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.62"
+VERSION="0.2.64"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -310,14 +310,33 @@ cleanup() {
     if [ -n "$DORA_GRAPH_NAME" ]; then
         log_info "Stopping DORA dataflow: $DORA_GRAPH_NAME"
         dora stop "$DORA_GRAPH_NAME" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Destroy DORA graph to ensure all nodes are terminated
+    # This is critical to release video devices properly
+    if [ -n "$DORA_GRAPH_NAME" ]; then
+        log_info "Destroying DORA graph: $DORA_GRAPH_NAME"
+        dora destroy "$DORA_GRAPH_NAME" 2>/dev/null || true
+        sleep 1
     fi
 
     # Kill DORA process if still running
     if [ -n "$DORA_PID" ] && kill -0 "$DORA_PID" 2>/dev/null; then
         log_info "Killing DORA process (PID: $DORA_PID)"
         kill "$DORA_PID" 2>/dev/null || true
+        sleep 0.5
+        # Force kill if still alive
+        if kill -0 "$DORA_PID" 2>/dev/null; then
+            log_warn "Force killing DORA process..."
+            kill -9 "$DORA_PID" 2>/dev/null || true
+        fi
         wait "$DORA_PID" 2>/dev/null || true
     fi
+
+    # Kill any remaining camera_opencv processes that might hold /dev/video devices
+    log_info "Cleaning up any stale camera processes..."
+    pkill -f "camera_opencv/main.py" 2>/dev/null || true
 
     # Clean up socket files
     if [ -S "$SOCKET_IMAGE" ]; then
@@ -333,9 +352,30 @@ cleanup() {
 # Set up trap for cleanup
 trap cleanup EXIT INT TERM
 
-# Clean up stale socket files from previous runs
+# Clean up stale processes and socket files from previous runs
 cleanup_stale_sockets() {
-    log_step "Checking for stale socket files..."
+    log_step "Checking for stale processes and socket files..."
+
+    # Kill any stale camera_opencv processes that might be holding /dev/video devices
+    if pgrep -f "camera_opencv/main.py" > /dev/null 2>&1; then
+        log_warn "Found stale camera processes, killing..."
+        pkill -f "camera_opencv/main.py" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Kill any stale arm processes
+    if pgrep -f "arm_normal_so101_v1/main.py" > /dev/null 2>&1; then
+        log_warn "Found stale arm processes, killing..."
+        pkill -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Kill any stale DORA coordinator processes
+    if pgrep -f "dora-coordinator" > /dev/null 2>&1; then
+        log_warn "Found stale DORA coordinator, killing..."
+        pkill -f "dora-coordinator" 2>/dev/null || true
+        sleep 1
+    fi
 
     if [ -e "$SOCKET_IMAGE" ]; then
         log_warn "Removing stale socket: $SOCKET_IMAGE"
