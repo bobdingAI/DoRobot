@@ -41,8 +41,52 @@ from operating_platform.core.record import Record, RecordConfig
 from operating_platform.core.replay import DatasetReplayConfig, ReplayConfig, replay
 from operating_platform.utils.camera_display import CameraDisplay
 from operating_platform.core.cloud_train import CloudTrainer, run_cloud_training
+import getpass
 
 DEFAULT_FPS = 30
+
+# Global cloud credentials (set at startup if CLOUD_OFFLOAD=1)
+_cloud_credentials = None
+
+
+def prompt_cloud_login():
+    """
+    Prompt user for cloud login credentials at startup.
+    Returns (username, password) tuple or None if login fails.
+    """
+    global _cloud_credentials
+
+    logging.info("=" * 50)
+    logging.info("CLOUD MODE - Login Required")
+    logging.info("=" * 50)
+    print("\nPlease enter your cloud training credentials:")
+
+    try:
+        username = input("Username: ").strip()
+        password = getpass.getpass("Password: ").strip()
+
+        if not username or not password:
+            logging.error("Username and password are required")
+            return None
+
+        # Test login with CloudTrainer
+        logging.info("Verifying credentials...")
+        trainer = CloudTrainer(username=username, password=password)
+        if trainer.login():
+            logging.info("Login successful!")
+            _cloud_credentials = (username, password)
+            trainer.cleanup()
+            return _cloud_credentials
+        else:
+            logging.error("Login failed - invalid credentials")
+            return None
+
+    except KeyboardInterrupt:
+        logging.info("\nLogin cancelled")
+        return None
+    except Exception as e:
+        logging.error(f"Login error: {e}")
+        return None
 
 @cache
 def is_headless():
@@ -211,32 +255,20 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     else:
         logging.info(f"Starting new recording session in: {target_dir}")
 
-    # 任务配置（从配置获取而非硬编码）
-    try:
-        record_cmd = {
-            "task_id": cfg.record.task_id or "default_task",
-            "task_name": repo_id,
-            "task_data_id": cfg.record.data_id or "001",
-            "collector_id": cfg.record.collector_id or "default_collector",
-            "countdown_seconds": cfg.record.countdown or 3,
-            "task_steps": [
-                {
-                    "duration": str(step.get("duration", 10)),
-                    "instruction": step.get("instruction", "put")
-                } for step in cfg.record.task_steps
-            ]
-        }
-    except Exception as e:
-        logging.error(f"Invalid task configuration: {str(e)}")
-        record_cmd = {
-            "task_id": "fallback_task",
-            "task_name": repo_id,
-            "task_data_id": "001",
-            "collector_id": "fallback_collector",
-            "countdown_seconds": 3,
-            "task_steps": [{"duration": "10", "instruction": "put"}]
-        }
-        logging.warning("Using fallback task configuration")
+    # 任务配置（使用默认值，可选字段从配置获取）
+    record_cmd = {
+        "task_id": getattr(cfg.record, 'task_id', None) or "default_task",
+        "task_name": repo_id,
+        "task_data_id": getattr(cfg.record, 'data_id', None) or "001",
+        "collector_id": getattr(cfg.record, 'collector_id', None) or "default_collector",
+        "countdown_seconds": getattr(cfg.record, 'countdown', None) or 3,
+        "task_steps": [
+            {
+                "duration": str(step.get("duration", 10)),
+                "instruction": step.get("instruction", "put")
+            } for step in getattr(cfg.record, 'task_steps', [{"duration": "10", "instruction": "put"}])
+        ]
+    }
 
     # 创建记录器一次，在整个session中复用
     record_cfg = RecordConfig(
@@ -253,12 +285,21 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         cloud_offload=getattr(cfg.record, 'cloud_offload', False),
     )
 
-    # Log cloud offload mode status
+    # Log cloud offload mode status and prompt for login
     if record_cfg.cloud_offload:
         logging.info("=" * 50)
         logging.info("CLOUD OFFLOAD MODE ENABLED")
         logging.info("Video encoding will be skipped - raw images uploaded to cloud")
         logging.info("=" * 50)
+
+        # Prompt for cloud login at startup
+        credentials = prompt_cloud_login()
+        if credentials is None:
+            logging.warning("=" * 50)
+            logging.warning("Cloud login failed or cancelled")
+            logging.warning("Data will be saved locally but NOT uploaded to cloud")
+            logging.warning("=" * 50)
+
     record = Record(
         fps=cfg.record.fps,
         robot=daemon.robot,
@@ -308,6 +349,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             observation = daemon.get_observation()
 
             # 显示图像（仅在非无头模式）- 使用统一相机窗口
+            # Update current_episode dynamically to show correct episode number
+            current_episode = record.dataset.meta.total_episodes
             if observation and not is_headless():
                 key = camera_display.show(observation, episode_index=current_episode, status="Recording")
             else:
@@ -359,11 +402,18 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     elif key in [ord('e'), ord('E')]:
                         logging.info("User requested exit during reset phase")
 
+                        # Show collection summary BEFORE starting encoding
+                        total_episodes = record.dataset.meta.total_episodes
+                        logging.info("=" * 50)
+                        logging.info("COLLECTION SUMMARY")
+                        logging.info(f"Total episodes collected: {total_episodes}")
+                        logging.info("=" * 50)
+
                         # Voice prompt
                         if record.cloud_offload:
-                            log_say("End collection. Uploading to cloud for training.", play_sounds=True)
+                            log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                         else:
-                            log_say("End collection. Please wait for video encoding.", play_sounds=True)
+                            log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
                         # Close camera display
                         camera_display.close()
@@ -392,28 +442,46 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                        f"completed={final_status['stats']['total_completed']} "
                                        f"failed={final_status['stats']['total_failed']}")
 
-                        # Run cloud training if enabled
+                        # Run cloud training if enabled and credentials available
                         if record.cloud_offload:
                             upload_dataset_path = str(target_dir)
                             logging.info(f"Dataset path: {upload_dataset_path}")
+                            logging.info(f"Local data saved at: {upload_dataset_path}")
 
-                            dorobot_home = Path.home() / "DoRobot"
-                            model_output_path = dorobot_home / "model"
-                            model_output_path.mkdir(parents=True, exist_ok=True)
+                            # Check if we have valid credentials
+                            if _cloud_credentials is None:
+                                logging.warning("=" * 50)
+                                logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
+                                logging.warning(f"Local data preserved at: {upload_dataset_path}")
+                                logging.warning("=" * 50)
+                                log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                            else:
+                                dorobot_home = Path.home() / "DoRobot"
+                                model_output_path = dorobot_home / "model"
+                                model_output_path.mkdir(parents=True, exist_ok=True)
 
-                            try:
-                                success = run_cloud_training(
-                                    dataset_path=upload_dataset_path,
-                                    model_output_path=str(model_output_path),
-                                    timeout_minutes=120
-                                )
-                                if success:
-                                    logging.info("Cloud training completed!")
-                                    log_say("Training complete.", play_sounds=True)
-                                else:
-                                    logging.error("Cloud training failed!")
-                            except Exception as e:
-                                logging.error(f"Cloud training error: {e}")
+                                try:
+                                    username, password = _cloud_credentials
+                                    success = run_cloud_training(
+                                        dataset_path=upload_dataset_path,
+                                        model_output_path=str(model_output_path),
+                                        username=username,
+                                        password=password,
+                                        timeout_minutes=120
+                                    )
+                                    if success:
+                                        logging.info("Cloud training completed!")
+                                        log_say("Training complete.", play_sounds=True)
+                                    else:
+                                        logging.error("=" * 50)
+                                        logging.error("CLOUD TRAINING FAILED")
+                                        logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                        logging.error("=" * 50)
+                                        log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                except Exception as e:
+                                    logging.error(f"Cloud training error: {e}")
+                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                    log_say("Cloud training error. Local data saved.", play_sounds=True)
 
                         return
                 else:
@@ -428,11 +496,18 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             elif key in [ord('e'), ord('E')]:
                 logging.info("Stopping recording and exiting...")
 
+                # Show collection summary BEFORE starting encoding
+                total_episodes = record.dataset.meta.total_episodes
+                logging.info("=" * 50)
+                logging.info("COLLECTION SUMMARY")
+                logging.info(f"Total episodes collected: {total_episodes}")
+                logging.info("=" * 50)
+
                 # Voice prompt: different message based on cloud_offload mode
                 if record.cloud_offload:
-                    log_say("End collection. Uploading to cloud for training.", play_sounds=True)
+                    log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                 else:
-                    log_say("End collection. Please wait for video encoding.", play_sounds=True)
+                    log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
                 # Close camera display window FIRST to release video resources
                 logging.info("Closing camera display...")
@@ -481,39 +556,55 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     # Get dataset path for upload
                     upload_dataset_path = str(target_dir)
                     logging.info(f"Dataset path: {upload_dataset_path}")
+                    logging.info(f"Local data saved at: {upload_dataset_path}")
 
-                    # Model output path: sibling folder ~/DoRobot/model
-                    dorobot_home = Path.home() / "DoRobot"
-                    model_output_path = dorobot_home / "model"
-                    model_output_path.mkdir(parents=True, exist_ok=True)
-                    logging.info(f"Model output path: {model_output_path}")
+                    # Check if we have valid credentials
+                    if _cloud_credentials is None:
+                        logging.warning("=" * 50)
+                        logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
+                        logging.warning(f"Local data preserved at: {upload_dataset_path}")
+                        logging.warning("=" * 50)
+                        log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                    else:
+                        # Model output path: sibling folder ~/DoRobot/model
+                        dorobot_home = Path.home() / "DoRobot"
+                        model_output_path = dorobot_home / "model"
+                        model_output_path.mkdir(parents=True, exist_ok=True)
+                        logging.info(f"Model output path: {model_output_path}")
 
-                    # Run cloud training
-                    logging.info("="*50)
-                    logging.info("Starting cloud training workflow...")
-                    logging.info("="*50)
+                        # Run cloud training
+                        logging.info("="*50)
+                        logging.info("Starting cloud training workflow...")
+                        logging.info("="*50)
 
-                    try:
-                        success = run_cloud_training(
-                            dataset_path=upload_dataset_path,
-                            model_output_path=str(model_output_path),
-                            timeout_minutes=120  # 2 hours timeout
-                        )
+                        try:
+                            username, password = _cloud_credentials
+                            success = run_cloud_training(
+                                dataset_path=upload_dataset_path,
+                                model_output_path=str(model_output_path),
+                                username=username,
+                                password=password,
+                                timeout_minutes=120  # 2 hours timeout
+                            )
 
-                        if success:
-                            logging.info("="*50)
-                            logging.info("CLOUD TRAINING COMPLETED SUCCESSFULLY!")
-                            logging.info(f"Model downloaded to: {model_output_path}")
-                            logging.info("="*50)
-                            log_say("Training complete. Model downloaded.", play_sounds=True)
-                        else:
-                            logging.error("Cloud training failed!")
-                            log_say("Training failed.", play_sounds=True)
+                            if success:
+                                logging.info("="*50)
+                                logging.info("CLOUD TRAINING COMPLETED SUCCESSFULLY!")
+                                logging.info(f"Model downloaded to: {model_output_path}")
+                                logging.info("="*50)
+                                log_say("Training complete. Model downloaded.", play_sounds=True)
+                            else:
+                                logging.error("=" * 50)
+                                logging.error("CLOUD TRAINING FAILED")
+                                logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                logging.error("=" * 50)
+                                log_say("Cloud training failed. Local data saved.", play_sounds=True)
 
-                    except Exception as e:
-                        logging.error(f"Cloud training error: {e}")
-                        traceback.print_exc()
-                        log_say("Training error.", play_sounds=True)
+                        except Exception as e:
+                            logging.error(f"Cloud training error: {e}")
+                            logging.error(f"Local data preserved at: {upload_dataset_path}")
+                            traceback.print_exc()
+                            log_say("Cloud training error. Local data saved.", play_sounds=True)
 
                 return
 

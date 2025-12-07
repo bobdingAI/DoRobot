@@ -233,12 +233,13 @@ class CameraDisplay:
         if status:
             status_text += f"  |  {status}"
 
-        # Add text
+        # Add text (light red/salmon color for better visibility on dark background)
+        # BGR format: (180, 150, 255) = light red/salmon
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.7
         cv2.putText(
             status_bar, status_text, (10, 22),
-            font, font_scale, (0, 255, 0), 1, cv2.LINE_AA
+            font, font_scale, (180, 150, 255), 1, cv2.LINE_AA
         )
 
         # Add key hints on right side

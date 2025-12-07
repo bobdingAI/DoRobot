@@ -353,10 +353,10 @@ main() {
                 log_warn "Could not install speech-dispatcher automatically."
                 log_warn "Please run: sudo apt install speech-dispatcher"
             }
-            log_info "Installing portaudio for audio recording..."
-            sudo apt install -y portaudio19-dev || {
-                log_warn "Could not install portaudio19-dev automatically."
-                log_warn "Please run: sudo apt install portaudio19-dev"
+            log_info "Installing audio dependencies (portaudio, ffmpeg, alsa)..."
+            sudo apt install -y portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 || {
+                log_warn "Could not install audio dependencies automatically."
+                log_warn "Please run: sudo apt install portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2"
             }
         elif command -v dnf &> /dev/null; then
             # OpenEuler/Fedora/RHEL 8+
