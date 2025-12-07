@@ -357,11 +357,64 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         logging.info("Reset confirmed. Proceeding to next episode...")
                         break
                     elif key in [ord('e'), ord('E')]:
-                        logging.info("User aborted during reset")
-                        # Trigger exit by setting key and breaking
+                        logging.info("User requested exit during reset phase")
+
+                        # Voice prompt
+                        if record.cloud_offload:
+                            log_say("End collection. Uploading to cloud for training.", play_sounds=True)
+                        else:
+                            log_say("End collection. Please wait for video encoding.", play_sounds=True)
+
+                        # Close camera display
                         camera_display.close()
                         cv2.destroyAllWindows()
+                        cv2.waitKey(1)
+
+                        # Stop daemon first
+                        logging.info("Stopping DORA daemon...")
                         daemon.stop()
+                        logging.info("DORA daemon stopped")
+
+                        # Stop recording thread and wait for image writer
+                        record.stop()
+
+                        # Wait for all async saves to complete (including encoding)
+                        if hasattr(record, 'async_saver') and record.async_saver:
+                            status = record.async_saver.get_status()
+                            pending_total = status['pending_count'] + status['queue_size']
+                            if pending_total > 0:
+                                logging.info(f"Waiting for {pending_total} saves (queue={status['queue_size']}, pending={status['pending_count']})...")
+
+                            record.async_saver.stop(wait_for_completion=True)
+
+                            final_status = record.async_saver.get_status()
+                            logging.info(f"Save stats: queued={final_status['stats']['total_queued']} "
+                                       f"completed={final_status['stats']['total_completed']} "
+                                       f"failed={final_status['stats']['total_failed']}")
+
+                        # Run cloud training if enabled
+                        if record.cloud_offload:
+                            upload_dataset_path = str(target_dir)
+                            logging.info(f"Dataset path: {upload_dataset_path}")
+
+                            dorobot_home = Path.home() / "DoRobot"
+                            model_output_path = dorobot_home / "model"
+                            model_output_path.mkdir(parents=True, exist_ok=True)
+
+                            try:
+                                success = run_cloud_training(
+                                    dataset_path=upload_dataset_path,
+                                    model_output_path=str(model_output_path),
+                                    timeout_minutes=120
+                                )
+                                if success:
+                                    logging.info("Cloud training completed!")
+                                    log_say("Training complete.", play_sounds=True)
+                                else:
+                                    logging.error("Cloud training failed!")
+                            except Exception as e:
+                                logging.error(f"Cloud training error: {e}")
+
                         return
                 else:
                     logging.info("Reset timeout - auto-proceeding to next episode")

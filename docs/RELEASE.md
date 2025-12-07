@@ -4,6 +4,48 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.62 (2025-12-07) - Fix Exit During Reset Phase
+
+### Summary
+Fixed video encoding being skipped when pressing 'e' during the reset phase (after pressing 'n' to save episode).
+
+### Problem
+When user pressed 'n' (save episode), then 'p' (reset), then 'e' (exit), the program exited immediately without waiting for video encoding. The logs showed:
+```
+[Daemon] Robot disconnected
+[Cleanup] Releasing resources...
+[Cleanup] OpenCV windows closed
+[Cleanup] Daemon stopped
+[Cleanup] Resources released
+```
+No encoding logs appeared, and no `videos/` folder was created.
+
+### Root Cause
+There were TWO separate 'e' key handlers in `main.py`:
+1. **Line 359-365 (inside reset loop)**: Only called `daemon.stop()` and `return` - **missing video encoding wait**
+2. **Line 428+ (main loop)**: Properly waited for `async_saver.stop(wait_for_completion=True)`
+
+When 'e' was pressed during the reset phase (after 'n' but before 'p'), the first handler was triggered, bypassing all encoding.
+
+### Solution
+Updated the 'e' handler inside the reset loop (lines 359-418) to include proper cleanup:
+1. Voice prompt for encoding status
+2. Close camera display
+3. Stop DORA daemon
+4. Call `record.stop()` to finish recording
+5. Call `record.async_saver.stop(wait_for_completion=True)` to wait for encoding
+6. Show save statistics
+7. Run cloud training if enabled
+
+### Changes
+
+**operating_platform/core/main.py**
+- Expanded reset loop 'e' handler from 6 lines to ~60 lines
+- Now matches the main loop 'e' handler behavior exactly
+- Added proper logging for each exit step
+
+---
+
 ## v0.2.61 (2025-12-06) - Default Settings & Auto Dataset Cleanup
 
 ### Summary

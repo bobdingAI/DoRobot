@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.61"
+VERSION="0.2.62"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
