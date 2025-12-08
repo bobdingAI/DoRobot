@@ -6,11 +6,13 @@
 # Uses the SAME device port configuration as run_so101.sh for consistency.
 #
 # Usage:
-#   bash scripts/run_so101_inference.sh --dataset /path/to/dataset --model /path/to/model [options]
+#   bash scripts/run_so101_inference.sh [options]
 #
-# Required:
-#   --dataset PATH  Path to dataset directory (for feature definitions)
-#   --model PATH    Path to trained model directory
+# Options:
+#   --dataset PATH  Path to dataset directory (default: ~/DoRobot/dataset/${REPO_ID})
+#   --model PATH    Path to trained model directory (default: ~/DoRobot/model)
+#
+# When run without arguments, uses defaults that match cloud training output.
 
 set -e
 
@@ -274,16 +276,19 @@ start_inference() {
 
 # Print usage
 print_usage() {
-    echo "Usage: $0 --dataset PATH --model PATH [OPTIONS]"
+    echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "SO101 Robot Inference Launcher"
     echo ""
-    echo "Required:"
-    echo "  --dataset PATH      Path to dataset directory (for feature definitions)"
+    echo "Options:"
+    echo "  --dataset PATH      Path to dataset directory"
+    echo "                      (default: ~/DoRobot/dataset/\${REPO_ID})"
     echo "  --model PATH        Path to trained model directory"
+    echo "                      (default: ~/DoRobot/model)"
     echo ""
     echo "Environment Variables:"
     echo "  CONDA_ENV           Conda environment (default: dorobot)"
+    echo "  REPO_ID             Dataset name for default path (default: so101-test)"
     echo "  SINGLE_TASK         Task description for inference"
     echo "  USE_NPU             Ascend NPU support (default: 1)"
     echo "  SHOW                Camera display (default: 1)"
@@ -297,16 +302,26 @@ print_usage() {
     echo "  Find your paths: python scripts/detect_usb_ports.py --yaml"
     echo ""
     echo "Examples:"
-    echo "  $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
-    echo "  SINGLE_TASK=\"Pick up the apple\" $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
+    echo "  # Use defaults (after cloud training)"
+    echo "  $0"
     echo ""
-    echo "  # With persistent device paths (recommended):"
-    echo "  CAMERA_TOP_PATH=\"/dev/v4l/by-path/...\" ARM_FOLLOWER_PORT=\"/dev/serial/by-path/...\" \\"
-    echo "    $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
+    echo "  # With custom dataset name (uses ~/DoRobot/dataset/my-task)"
+    echo "  REPO_ID=my-task $0"
+    echo ""
+    echo "  # Explicit paths"
+    echo "  $0 --dataset ~/DoRobot/dataset/so101-test --model ~/DoRobot/model"
+    echo ""
+    echo "  # With custom task description"
+    echo "  SINGLE_TASK=\"Pick up the apple\" $0"
 }
 
 # Parse arguments
 parse_args() {
+    # Default paths based on data collection output
+    local repo_id="${REPO_ID:-so101-test}"
+    local default_dataset="$HOME/DoRobot/dataset/$repo_id"
+    local default_model="$HOME/DoRobot/model"
+
     DATASET_PATH=""
     MODEL_PATH=""
     EXTRA_ARGS=()
@@ -332,27 +347,27 @@ parse_args() {
         esac
     done
 
+    # Use defaults if not specified
     if [ -z "$DATASET_PATH" ]; then
-        log_error "Missing required argument: --dataset PATH"
-        echo ""
-        print_usage
-        exit 1
+        DATASET_PATH="$default_dataset"
+        log_info "Using default dataset path: $DATASET_PATH"
     fi
 
     if [ -z "$MODEL_PATH" ]; then
-        log_error "Missing required argument: --model PATH"
-        echo ""
-        print_usage
-        exit 1
+        MODEL_PATH="$default_model"
+        log_info "Using default model path: $MODEL_PATH"
     fi
 
+    # Validate paths exist
     if [ ! -d "$DATASET_PATH" ]; then
         log_error "Dataset path does not exist: $DATASET_PATH"
+        log_error "Run data collection first: bash scripts/run_so101.sh"
         exit 1
     fi
 
     if [ ! -d "$MODEL_PATH" ]; then
         log_error "Model path does not exist: $MODEL_PATH"
+        log_error "Train a model first or download one to: $MODEL_PATH"
         exit 1
     fi
 }

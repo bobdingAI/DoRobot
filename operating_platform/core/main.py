@@ -230,11 +230,12 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     dataset_path.mkdir(parents=True, exist_ok=True)
     logging.info(f"Dataset root directory: {dataset_path}")
 
-    # 1. 动态获取当前日期（支持跨天运行）
-    date_str = datetime.now().strftime("%Y%m%d")
+    # Get repo_id from config
     repo_id = cfg.record.repo_id
 
-    target_dir = dataset_path / date_str / "experimental" / repo_id
+    # Simple path structure: ~/DoRobot/dataset/{repo_id}/
+    # This makes it easy to match with inference and cloud training
+    target_dir = dataset_path / repo_id
     # 创建目标目录（确保父目录存在）
     target_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Target directory: {target_dir}")
@@ -242,18 +243,35 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     # Check if cloud_offload mode is enabled
     cloud_offload = getattr(cfg.record, 'cloud_offload', False)
 
+    # Model output path (used by cloud training)
+    dorobot_home = Path.home() / "DoRobot"
+    model_dir = dorobot_home / "model"
+
     # Always clear existing data to start fresh
     # This prevents issues with incomplete/corrupted data from previous runs
-    # Users don't need to manually clean up the dataset folder
+    # Users don't need to manually clean up folders between sessions
+    import shutil
     resume = False
-    if any(target_dir.iterdir()):  # 检查目录是否非空
-        import shutil
-        logging.warning(f"Clearing existing data in {target_dir}")
+
+    # Clear dataset folder if it exists and has content
+    if target_dir.exists() and any(target_dir.iterdir()):
+        logging.warning(f"Clearing existing dataset in {target_dir}")
         shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Starting fresh recording session in: {target_dir}")
+        logging.info(f"Dataset folder cleared")
     else:
         logging.info(f"Starting new recording session in: {target_dir}")
+
+    # Clear model folder if it exists and has content
+    # This ensures inference will use the newly trained model after cloud training
+    if model_dir.exists() and any(model_dir.iterdir()):
+        logging.warning(f"Clearing existing model in {model_dir}")
+        shutil.rmtree(model_dir)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Model folder cleared")
+    else:
+        model_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Model folder ready: {model_dir}")
 
     # 任务配置（使用默认值，可选字段从配置获取）
     record_cmd = {
