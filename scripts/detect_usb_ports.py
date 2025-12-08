@@ -51,7 +51,15 @@ def get_device_info(device_path: str) -> dict:
 
 
 def is_video_capture_device(dev_path: str) -> bool:
-    """Check if device is a video capture device using v4l2-ctl or ioctl."""
+    """
+    Check if device is a video capture device using v4l2-ctl or udevadm.
+
+    USB cameras typically register 2 /dev/video* devices:
+    - Even numbered (video0, video2, etc.) = actual capture device
+    - Odd numbered (video1, video3, etc.) = metadata device
+
+    We only want the actual capture devices.
+    """
     # Method 1: Try v4l2-ctl (most reliable)
     try:
         result = subprocess.run(
@@ -63,6 +71,9 @@ def is_video_capture_device(dev_path: str) -> bool:
         # Check if it's a capture device (has video capture capability)
         if "Video Capture" in result.stdout:
             return True
+        # If v4l2-ctl works but no "Video Capture" found, it's likely metadata device
+        if result.returncode == 0:
+            return False
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
@@ -74,26 +85,24 @@ def is_video_capture_device(dev_path: str) -> bool:
             text=True,
             timeout=5,
         )
-        # Look for capture capability
+        # Look for capture capability - this is definitive
         if "ID_V4L_CAPABILITIES=:capture:" in result.stdout:
             return True
-        # Also check if it's a video4linux device at all
-        if "ID_V4L_VERSION" in result.stdout:
-            # Assume it's a capture device if no specific capability info
-            # but skip if it looks like a metadata device
-            dev_num = dev_path.replace("/dev/video", "")
-            if dev_num.isdigit():
-                # On many systems, even numbered devices are capture, odd are metadata
-                # But this isn't always true, so we include all if we can't determine
-                return True
+        # If capabilities are specified but no "capture", skip this device
+        if "ID_V4L_CAPABILITIES=" in result.stdout:
+            return False
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Method 3: Fallback - just check if device exists and is accessible
+    # Method 3: Fallback - use even/odd heuristic
+    # USB cameras typically use even numbers for capture, odd for metadata
     try:
-        if os.path.exists(dev_path) and os.access(dev_path, os.R_OK):
-            return True
-    except Exception:
+        dev_num = dev_path.replace("/dev/video", "")
+        if dev_num.isdigit():
+            # Even numbered devices (0, 2, 4...) are capture devices
+            # Odd numbered devices (1, 3, 5...) are metadata devices
+            return int(dev_num) % 2 == 0
+    except ValueError:
         pass
 
     return False
