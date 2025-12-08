@@ -254,21 +254,28 @@ python operating_platform/core/train.py \
 
 ### Using the Inference Launcher (Recommended)
 
-The `run_so101_inference.sh` script handles all setup automatically:
+The `run_so101_inference.sh` script handles all setup automatically. After cloud training, just run:
 
 ```bash
-# Basic usage with dataset and trained model
-bash scripts/run_so101_inference.sh --dataset /path/to/dataset --model /path/to/model
+# Default usage (uses ~/DoRobot/dataset/so101-test and ~/DoRobot/model)
+bash scripts/run_so101_inference.sh
 
-# Example with paths
-bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
+# With custom dataset name (must match REPO_ID used during data collection)
+REPO_ID=my-task bash scripts/run_so101_inference.sh
+
+# With explicit paths
+bash scripts/run_so101_inference.sh --dataset ~/DoRobot/dataset/so101-test --model ~/DoRobot/model
 
 # With custom task description
-SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
+SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh
 
 # Disable NPU (for non-Ascend hardware)
-USE_NPU=0 bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
+USE_NPU=0 bash scripts/run_so101_inference.sh
 ```
+
+**Default Paths:**
+- Dataset: `~/DoRobot/dataset/${REPO_ID}` (default REPO_ID: so101-test)
+- Model: `~/DoRobot/model`
 
 **Important:** Use the SAME device ports as data collection for consistent results.
 
@@ -287,9 +294,9 @@ conda activate dorobot
 
 python operating_platform/core/inference.py \
   --robot.type=so101 \
-  --inference.dataset.repo_id="/path/to/dataset" \
+  --inference.dataset.repo_id="~/DoRobot/dataset/so101-test" \
   --inference.single_task="task description" \
-  --policy.path="/path/to/model"
+  --policy.path="~/DoRobot/model"
 ```
 
 ## Environment Variables
