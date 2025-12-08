@@ -14,10 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import warnings
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import einops
-import gymnasium as gym
 import numpy as np
 import torch
 from torch import Tensor
@@ -25,6 +24,11 @@ from torch import Tensor
 from operating_platform.config.types import FeatureType, PolicyFeature
 from operating_platform.envs.configs import EnvConfig
 from operating_platform.utils.utils import get_channel_first_image_shape
+
+# Lazy import gymnasium - only needed for simulation environments
+# This allows inference.py to run without gymnasium installed
+if TYPE_CHECKING:
+    import gymnasium as gym
 
 
 def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Tensor]:
@@ -101,12 +105,12 @@ def env_to_policy_features(env_cfg: EnvConfig) -> dict[str, PolicyFeature]:
     return policy_features
 
 
-def are_all_envs_same_type(env: gym.vector.VectorEnv) -> bool:
+def are_all_envs_same_type(env: "gym.vector.VectorEnv") -> bool:
     first_type = type(env.envs[0])  # Get type of first env
     return all(type(e) is first_type for e in env.envs)  # Fast type check
 
 
-def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
+def check_env_attributes_and_types(env: "gym.vector.VectorEnv") -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("once", UserWarning)  # Apply filter only in this function
 
@@ -124,7 +128,7 @@ def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
             )
 
 
-def add_envs_task(env: gym.vector.VectorEnv, observation: dict[str, Any]) -> dict[str, Any]:
+def add_envs_task(env: "gym.vector.VectorEnv", observation: dict[str, Any]) -> dict[str, Any]:
     """Adds task feature to the observation dict with respect to the first environment attribute."""
     if hasattr(env.envs[0], "task_description"):
         observation["task"] = env.call("task_description")
