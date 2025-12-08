@@ -6,9 +6,10 @@
 # Uses the SAME device port configuration as run_so101.sh for consistency.
 #
 # Usage:
-#   bash scripts/run_so101_inference.sh --model /path/to/model [options]
+#   bash scripts/run_so101_inference.sh --dataset /path/to/dataset --model /path/to/model [options]
 #
 # Required:
+#   --dataset PATH  Path to dataset directory (for feature definitions)
 #   --model PATH    Path to trained model directory
 
 set -e
@@ -245,19 +246,22 @@ start_dora() {
 
 # Start inference
 start_inference() {
-    local model_path="$1"
-    shift  # Remove model_path from args
+    local dataset_path="$1"
+    local model_path="$2"
+    shift 2  # Remove dataset_path and model_path from args
 
     log_step "Starting inference..."
 
     local single_task="${SINGLE_TASK:-Perform the trained task.}"
 
+    log_info "Dataset path: $dataset_path"
     log_info "Model path: $model_path"
     log_info "Task: $single_task"
 
     # Build command arguments
     local cmd_args=(
         --robot.type=so101
+        --inference.dataset.repo_id="$dataset_path"
         --inference.single_task="$single_task"
         --policy.path="$model_path"
     )
@@ -270,11 +274,12 @@ start_inference() {
 
 # Print usage
 print_usage() {
-    echo "Usage: $0 --model PATH [OPTIONS]"
+    echo "Usage: $0 --dataset PATH --model PATH [OPTIONS]"
     echo ""
     echo "SO101 Robot Inference Launcher"
     echo ""
     echo "Required:"
+    echo "  --dataset PATH      Path to dataset directory (for feature definitions)"
     echo "  --model PATH        Path to trained model directory"
     echo ""
     echo "Environment Variables:"
@@ -292,21 +297,26 @@ print_usage() {
     echo "  Find your paths: python scripts/detect_usb_ports.py --yaml"
     echo ""
     echo "Examples:"
-    echo "  $0 --model ~/DoRobot/model"
-    echo "  SINGLE_TASK=\"Pick up the apple\" $0 --model ~/DoRobot/model"
+    echo "  $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
+    echo "  SINGLE_TASK=\"Pick up the apple\" $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
     echo ""
     echo "  # With persistent device paths (recommended):"
     echo "  CAMERA_TOP_PATH=\"/dev/v4l/by-path/...\" ARM_FOLLOWER_PORT=\"/dev/serial/by-path/...\" \\"
-    echo "    $0 --model ~/DoRobot/model"
+    echo "    $0 --dataset ~/data/so101-test --model ~/DoRobot/model"
 }
 
 # Parse arguments
 parse_args() {
+    DATASET_PATH=""
     MODEL_PATH=""
     EXTRA_ARGS=()
 
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --dataset)
+                DATASET_PATH="$2"
+                shift 2
+                ;;
             --model)
                 MODEL_PATH="$2"
                 shift 2
@@ -322,10 +332,22 @@ parse_args() {
         esac
     done
 
+    if [ -z "$DATASET_PATH" ]; then
+        log_error "Missing required argument: --dataset PATH"
+        echo ""
+        print_usage
+        exit 1
+    fi
+
     if [ -z "$MODEL_PATH" ]; then
         log_error "Missing required argument: --model PATH"
         echo ""
         print_usage
+        exit 1
+    fi
+
+    if [ ! -d "$DATASET_PATH" ]; then
+        log_error "Dataset path does not exist: $DATASET_PATH"
         exit 1
     fi
 
@@ -381,12 +403,13 @@ main() {
     echo ""
     echo "=========================================="
     echo "  Starting Inference"
+    echo "  Dataset: $DATASET_PATH"
     echo "  Model: $MODEL_PATH"
     echo "=========================================="
     echo ""
 
     # Step 4: Start inference
-    start_inference "$MODEL_PATH" "${EXTRA_ARGS[@]}"
+    start_inference "$DATASET_PATH" "$MODEL_PATH" "${EXTRA_ARGS[@]}"
 
     log_info "Inference session ended"
 }

@@ -257,17 +257,17 @@ python operating_platform/core/train.py \
 The `run_so101_inference.sh` script handles all setup automatically:
 
 ```bash
-# Basic usage with trained model
-bash scripts/run_so101_inference.sh --model /path/to/model
+# Basic usage with dataset and trained model
+bash scripts/run_so101_inference.sh --dataset /path/to/dataset --model /path/to/model
 
-# Example with model in ~/DoRobot/model
-bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+# Example with paths
+bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
 
 # With custom task description
-SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
 
 # Disable NPU (for non-Ascend hardware)
-USE_NPU=0 bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+USE_NPU=0 bash scripts/run_so101_inference.sh --dataset ~/data/so101-test --model ~/DoRobot/model
 ```
 
 **Important:** Use the SAME device ports as data collection for consistent results.
@@ -287,6 +287,7 @@ conda activate dorobot
 
 python operating_platform/core/inference.py \
   --robot.type=so101 \
+  --inference.dataset.repo_id="/path/to/dataset" \
   --inference.single_task="task description" \
   --policy.path="/path/to/model"
 ```
