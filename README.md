@@ -252,14 +252,43 @@ python operating_platform/core/train.py \
 
 ## Inference
 
+### Using the Inference Launcher (Recommended)
+
+The `run_so101_inference.sh` script handles all setup automatically:
+
+```bash
+# Basic usage with trained model
+bash scripts/run_so101_inference.sh --model /path/to/model
+
+# Example with model in ~/DoRobot/model
+bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+
+# With custom task description
+SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+
+# Disable NPU (for non-Ascend hardware)
+USE_NPU=0 bash scripts/run_so101_inference.sh --model ~/DoRobot/model
+```
+
+**Important:** Use the SAME device ports as data collection for consistent results.
+
+### Inference Controls
+
+| Key | Action |
+|-----|--------|
+| `n` | End current episode and start new one |
+| `p` | Proceed after robot reset |
+| `e` | Stop inference and exit |
+
+### Manual Inference (Alternative)
+
 ```bash
 conda activate dorobot
 
 python operating_platform/core/inference.py \
   --robot.type=so101 \
   --inference.single_task="task description" \
-  --inference.dataset.repo_id="/path/to/dataset" \
-  --policy.path="/path/to/checkpoint/pretrained_model"
+  --policy.path="/path/to/model"
 ```
 
 ## Environment Variables
