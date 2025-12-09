@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.72"
+VERSION="0.2.73"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -72,12 +72,12 @@ ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 #   1 = Cloud offload (upload raw images directly to cloud for encoding/training)
 #   2 = Edge offload (rsync raw images to edge server, edge encodes and uploads to cloud)
 # Edge mode (2) is fastest for LAN transfer, recommended when API server is on same network
-# Default is now 2 (edge mode) if config file sets it, otherwise 0 (local)
-CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
+# Default is 2 (edge mode) - fastest for typical LAN setup
+CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-2}"
 
 # Edge Server Configuration (only used when CLOUD_OFFLOAD=2)
-EDGE_SERVER_HOST="${EDGE_SERVER_HOST:-192.168.1.100}"
-EDGE_SERVER_USER="${EDGE_SERVER_USER:-dorobot}"
+EDGE_SERVER_HOST="${EDGE_SERVER_HOST:-127.0.0.1}"
+EDGE_SERVER_USER="${EDGE_SERVER_USER:-nupylot}"
 EDGE_SERVER_PASSWORD="${EDGE_SERVER_PASSWORD:-}"  # SSH password (uses paramiko if set)
 EDGE_SERVER_PORT="${EDGE_SERVER_PORT:-22}"
 EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"

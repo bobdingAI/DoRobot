@@ -4,6 +4,23 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.73 (2025-12-08) - Edge Mode as Default
+
+### Summary
+Changed hardcoded defaults in run_so101.sh so fresh installs use edge mode by default.
+
+### Changes
+
+**scripts/run_so101.sh**
+- Changed CLOUD_OFFLOAD default from 0 to 2 (edge mode)
+- Changed EDGE_SERVER_HOST default from 192.168.1.100 to 127.0.0.1
+- Changed EDGE_SERVER_USER default from dorobot to nupylot
+
+### Rationale
+On a fresh client install without `~/.dorobot_device.conf`, the script now uses edge mode by default. This ensures consistent behavior whether or not a config file exists.
+
+---
+
 ## v0.2.72 (2025-12-08) - Device Config Default Values & Edge Upload Test
 
 ### Summary
