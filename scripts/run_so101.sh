@@ -17,22 +17,62 @@
 set -e
 
 # Version
-VERSION="0.2.71"
+VERSION="0.2.72"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
+
+# ===========================================================================
+# LOAD CONFIG FILE FIRST (before setting any defaults)
+# ===========================================================================
+# The config file can define any of the settings below. Values from the config
+# file take precedence over script defaults, but command-line environment
+# variables override everything.
+#
+# Config file locations (checked in order):
+#   1. ~/.dorobot_device.conf
+#   2. /etc/dorobot/device.conf
+#   3. $PROJECT_ROOT/.device.conf
+#
+# Generate config with: python scripts/detect_usb_ports.py --save
+# ===========================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Device config file locations (checked in order)
+DEVICE_CONFIG_FILES=(
+    "$HOME/.dorobot_device.conf"
+    "/etc/dorobot/device.conf"
+    "$PROJECT_ROOT/.device.conf"
+)
+
+# Load device config if available (BEFORE setting defaults)
+# This allows config file values to be used as defaults
+for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+        LOADED_DEVICE_CONFIG="$config_file"
+        break
+    fi
+done
+
+# ===========================================================================
+# DEFAULT VALUES (only applied if not set by config file or environment)
+# ===========================================================================
 
 # NPU Configuration - enabled by default for Orange Pi/Ascend hardware
 # Set USE_NPU=0 to disable if not on NPU hardware
 USE_NPU="${USE_NPU:-1}"
 ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
-# Cloud Offload Configuration - disabled by default (local encoding)
+# Cloud Offload Configuration
 # CLOUD_OFFLOAD modes:
 #   0 = Local encoding (use NPU or CPU to encode videos locally)
 #   1 = Cloud offload (upload raw images directly to cloud for encoding/training)
 #   2 = Edge offload (rsync raw images to edge server, edge encodes and uploads to cloud)
 # Edge mode (2) is fastest for LAN transfer, recommended when API server is on same network
+# Default is now 2 (edge mode) if config file sets it, otherwise 0 (local)
 CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
 
 # Edge Server Configuration (only used when CLOUD_OFFLOAD=2)
@@ -41,6 +81,11 @@ EDGE_SERVER_USER="${EDGE_SERVER_USER:-dorobot}"
 EDGE_SERVER_PASSWORD="${EDGE_SERVER_PASSWORD:-}"  # SSH password (uses paramiko if set)
 EDGE_SERVER_PORT="${EDGE_SERVER_PORT:-22}"
 EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"
+
+# API Server Configuration (for cloud training)
+API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8000}"
+API_USERNAME="${API_USERNAME:-}"
+API_PASSWORD="${API_PASSWORD:-}"
 
 # ===========================================================================
 # DEVICE PORT CONFIGURATION
@@ -60,14 +105,7 @@ EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"
 #
 # ===========================================================================
 
-# Device config file locations (checked in order)
-DEVICE_CONFIG_FILES=(
-    "$HOME/.dorobot_device.conf"
-    "/etc/dorobot/device.conf"
-    "$PROJECT_ROOT/.device.conf"
-)
-
-# Source device config if exists
+# Source device config if exists (for logging function, config already loaded above)
 load_device_config() {
     for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
         if [ -f "$config_file" ]; then
@@ -78,19 +116,6 @@ load_device_config() {
     done
     return 1
 }
-
-# Try to load device config (before setting defaults)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Load device config if available (silent at this point, logged later)
-for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
-    if [ -f "$config_file" ]; then
-        source "$config_file"
-        LOADED_DEVICE_CONFIG="$config_file"
-        break
-    fi
-done
 
 # Default values (only used if not set by config file or environment)
 # Camera paths - use /dev/v4l/by-path/... for stability
