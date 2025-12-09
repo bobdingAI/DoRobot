@@ -4,6 +4,44 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.74 (2025-12-08) - Full Edge Workflow Test Script
+
+### Summary
+Added comprehensive test script for CLOUD_OFFLOAD=2 edge workflow that extracts frames from sample videos and tests the full pipeline: upload -> encode -> train.
+
+### New Files
+
+**scripts/test_edge_workflow.py**
+- Extracts frames from sample video files to create raw image dataset
+- Tests full edge upload workflow:
+  1. Extract frames from videos to simulate raw data collection
+  2. Upload raw images to edge server via SFTP (paramiko)
+  3. Notify edge server to start encoding
+  4. Trigger cloud training
+- Reports upload speed, timing, and success/failure status
+- Supports custom episode/frame limits
+
+### Usage
+
+```bash
+# Full workflow test with sample data
+python scripts/test_edge_workflow.py --source /Users/nupylot/Public/aimee-6283
+
+# Test with 3 episodes, 30 frames each
+python scripts/test_edge_workflow.py --source /path/to/data --episodes 3 --frames 30
+
+# Connection test only (SSH + API)
+python scripts/test_edge_workflow.py --test-connection
+
+# Upload and encode only (skip training)
+python scripts/test_edge_workflow.py --source /path/to/data --skip-training
+
+# Keep temp data for inspection
+python scripts/test_edge_workflow.py --source /path/to/data --keep-temp
+```
+
+---
+
 ## v0.2.73 (2025-12-08) - Edge Mode as Default
 
 ### Summary
