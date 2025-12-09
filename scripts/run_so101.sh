@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.83"
+VERSION="0.2.86"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -339,42 +339,77 @@ check_device_permissions() {
 }
 
 # Cleanup function - called on exit
+# CRITICAL: Proper cleanup order is essential to release USB devices
+# 1. Send STOP to DORA nodes (camera, arm) - they need time to release resources
+# 2. Wait for nodes to process STOP and release devices
+# 3. Then destroy DORA graph and kill remaining processes
 cleanup() {
-    log_step "Cleaning up..."
+    log_step "Cleaning up resources..."
 
-    # Stop DORA dataflow if running
+    # Step 1: Stop DORA dataflow - this sends STOP events to all nodes
     if [ -n "$DORA_GRAPH_NAME" ]; then
         log_info "Stopping DORA dataflow: $DORA_GRAPH_NAME"
         dora stop "$DORA_GRAPH_NAME" 2>/dev/null || true
-        sleep 1
+        # CRITICAL: Wait longer for nodes to receive STOP event and release resources
+        # Camera VideoCapture.release() and serial port close need time
+        log_info "Waiting for DORA nodes to release devices (3s)..."
+        sleep 3
     fi
 
-    # Destroy DORA graph to ensure all nodes are terminated
-    # This is critical to release video devices properly
+    # Step 2: Send SIGTERM to camera/arm processes FIRST and wait for cleanup
+    # This allows their signal handlers to run cleanup_video_capture()
+    log_info "Signaling camera processes to release video devices..."
+    pkill -SIGTERM -f "camera_opencv/main.py" 2>/dev/null || true
+
+    log_info "Signaling arm processes to release serial ports..."
+    pkill -SIGTERM -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+
+    # Wait for processes to handle SIGTERM and release devices
+    log_info "Waiting for device release (2s)..."
+    sleep 2
+
+    # Step 3: Now destroy DORA graph
     if [ -n "$DORA_GRAPH_NAME" ]; then
         log_info "Destroying DORA graph: $DORA_GRAPH_NAME"
         dora destroy "$DORA_GRAPH_NAME" 2>/dev/null || true
         sleep 1
     fi
 
-    # Kill DORA process if still running
+    # Step 4: Kill DORA coordinator process if still running
     if [ -n "$DORA_PID" ] && kill -0 "$DORA_PID" 2>/dev/null; then
-        log_info "Killing DORA process (PID: $DORA_PID)"
-        kill "$DORA_PID" 2>/dev/null || true
-        sleep 0.5
-        # Force kill if still alive
+        log_info "Stopping DORA process (PID: $DORA_PID)"
+        kill -SIGTERM "$DORA_PID" 2>/dev/null || true
+
+        # Wait up to 5 seconds for graceful shutdown
+        local wait_count=0
+        while kill -0 "$DORA_PID" 2>/dev/null && [ $wait_count -lt 10 ]; do
+            sleep 0.5
+            wait_count=$((wait_count + 1))
+        done
+
+        # Force kill ONLY if still alive after timeout (last resort)
         if kill -0 "$DORA_PID" 2>/dev/null; then
-            log_warn "Force killing DORA process..."
+            log_warn "Force killing DORA process (timeout)..."
             kill -9 "$DORA_PID" 2>/dev/null || true
         fi
         wait "$DORA_PID" 2>/dev/null || true
     fi
 
-    # Kill any remaining camera_opencv processes that might hold /dev/video devices
-    log_info "Cleaning up any stale camera processes..."
-    pkill -f "camera_opencv/main.py" 2>/dev/null || true
+    # Step 5: Final cleanup of any remaining processes
+    # Use SIGKILL here since we already tried SIGTERM above
+    if pgrep -f "camera_opencv/main.py" > /dev/null 2>&1; then
+        log_warn "Force killing remaining camera processes..."
+        pkill -9 -f "camera_opencv/main.py" 2>/dev/null || true
+        sleep 0.5
+    fi
 
-    # Clean up socket files
+    if pgrep -f "arm_normal_so101_v1/main.py" > /dev/null 2>&1; then
+        log_warn "Force killing remaining arm processes..."
+        pkill -9 -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+        sleep 0.5
+    fi
+
+    # Step 6: Clean up socket files
     if [ -S "$SOCKET_IMAGE" ]; then
         rm -f "$SOCKET_IMAGE"
     fi
@@ -389,27 +424,59 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Clean up stale processes and socket files from previous runs
+# Uses graceful shutdown (SIGTERM) first, then SIGKILL if needed
 cleanup_stale_sockets() {
     log_step "Checking for stale processes and socket files..."
 
+    local found_stale=0
+
     # Kill any stale camera_opencv processes that might be holding /dev/video devices
     if pgrep -f "camera_opencv/main.py" > /dev/null 2>&1; then
-        log_warn "Found stale camera processes, killing..."
-        pkill -f "camera_opencv/main.py" 2>/dev/null || true
-        sleep 1
+        log_warn "Found stale camera processes, sending SIGTERM..."
+        pkill -SIGTERM -f "camera_opencv/main.py" 2>/dev/null || true
+        found_stale=1
     fi
 
     # Kill any stale arm processes
     if pgrep -f "arm_normal_so101_v1/main.py" > /dev/null 2>&1; then
-        log_warn "Found stale arm processes, killing..."
-        pkill -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+        log_warn "Found stale arm processes, sending SIGTERM..."
+        pkill -SIGTERM -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+        found_stale=1
+    fi
+
+    # Wait for graceful cleanup if stale processes found
+    if [ $found_stale -eq 1 ]; then
+        log_info "Waiting for stale processes to release devices (3s)..."
+        sleep 3
+
+        # Force kill any remaining
+        if pgrep -f "camera_opencv/main.py" > /dev/null 2>&1; then
+            log_warn "Force killing remaining camera processes..."
+            pkill -9 -f "camera_opencv/main.py" 2>/dev/null || true
+        fi
+        if pgrep -f "arm_normal_so101_v1/main.py" > /dev/null 2>&1; then
+            log_warn "Force killing remaining arm processes..."
+            pkill -9 -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+        fi
         sleep 1
     fi
 
     # Kill any stale DORA coordinator processes
     if pgrep -f "dora-coordinator" > /dev/null 2>&1; then
         log_warn "Found stale DORA coordinator, killing..."
-        pkill -f "dora-coordinator" 2>/dev/null || true
+        pkill -SIGTERM -f "dora-coordinator" 2>/dev/null || true
+        sleep 2
+        # Force kill if still running
+        if pgrep -f "dora-coordinator" > /dev/null 2>&1; then
+            pkill -9 -f "dora-coordinator" 2>/dev/null || true
+        fi
+        sleep 1
+    fi
+
+    # Kill any stale dora-daemon processes
+    if pgrep -f "dora-daemon" > /dev/null 2>&1; then
+        log_warn "Found stale DORA daemon, killing..."
+        pkill -SIGTERM -f "dora-daemon" 2>/dev/null || true
         sleep 1
     fi
 

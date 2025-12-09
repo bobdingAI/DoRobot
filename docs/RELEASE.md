@@ -4,6 +4,52 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.86 (2025-12-09) - Fix USB port increment issue with improved cleanup
+
+### Summary
+Fixed video/serial port numbers incrementing after multiple recording sessions. The issue was caused by insufficient cleanup timing and force-killing processes without allowing them to release USB resources.
+
+### Problem
+After several rounds of data collection, USB port numbers kept increasing:
+- `/dev/video0` → `/dev/video2` → `/dev/video4`
+- `/dev/ttyACM0` → `/dev/ttyACM2` → `/dev/ttyACM4`
+
+This happened more frequently after v0.2.64 due to cleanup timing issues.
+
+### Root Causes
+1. **`dora stop` didn't wait** - Sent STOP events but returned before nodes processed them
+2. **Force kill with SIGKILL (-9)** - Bypassed signal handlers so `cleanup_video_capture()` never ran
+3. **No wait after pkill** - Camera processes killed before releasing VideoCapture
+4. **Wrong cleanup order** - Should kill camera/arm nodes FIRST, wait for release, then kill coordinator
+
+### Solution
+Rewrote `cleanup()` and `cleanup_stale_sockets()` functions with proper timing:
+
+**New cleanup sequence:**
+1. `dora stop` - Send STOP events to DORA nodes
+2. **Wait 3 seconds** - Allow nodes to receive STOP and release resources
+3. `pkill -SIGTERM` camera/arm processes - Trigger cleanup handlers
+4. **Wait 2 seconds** - Allow cleanup_video_capture() to run
+5. `dora destroy` - Clean up DORA graph
+6. Kill DORA coordinator with SIGTERM (wait up to 5s)
+7. Force kill (SIGKILL) only remaining stuck processes
+
+### Changes
+
+**scripts/run_so101.sh**
+- `cleanup()`: Complete rewrite with 6-step cleanup sequence
+- `cleanup_stale_sockets()`: Graceful shutdown before force kill
+- Added dora-daemon cleanup
+- Wait timeouts: 3s after dora stop, 2s after SIGTERM, 5s for DORA coordinator
+- Version bumped to 0.2.86
+
+### Expected Behavior
+- Port numbers should remain stable: `/dev/video0`, `/dev/video2`, `/dev/ttyACM0`, `/dev/ttyACM1`
+- Multiple sessions without needing to unplug/replug USB devices
+- Clean shutdown logs showing each cleanup step
+
+---
+
 ## v0.2.85 (2025-12-09) - Preserve config settings when running detect.sh
 
 ### Summary
