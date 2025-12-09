@@ -200,9 +200,42 @@ REPO_ID=my-dataset bash scripts/run_so101.sh
 
 # With custom task description
 REPO_ID=my-dataset SINGLE_TASK="pick up the cube" bash scripts/run_so101.sh
+```
 
-# With Ascend NPU support
-USE_NPU=1 bash scripts/run_so101.sh
+**Cloud Upload Modes (CLOUD=0,1,2,3):**
+```bash
+# Mode 0: Local only (encode locally, no upload)
+CLOUD=0 bash scripts/run_so101.sh
+
+# Mode 1: Cloud raw (upload raw images to cloud for encoding)
+CLOUD=1 bash scripts/run_so101.sh
+
+# Mode 2: Edge (rsync to edge server) - DEFAULT, fastest for LAN
+CLOUD=2 bash scripts/run_so101.sh
+
+# Mode 3: Cloud encoded (encode locally, upload encoded to cloud)
+CLOUD=3 bash scripts/run_so101.sh
+```
+
+**NPU Options (NPU=0,1):**
+```bash
+# Disable NPU (for non-Ascend hardware)
+NPU=0 bash scripts/run_so101.sh
+
+# Enable NPU (for Ascend 310B) - DEFAULT
+NPU=1 bash scripts/run_so101.sh
+```
+
+**Combined Examples:**
+```bash
+# Edge upload without NPU (for x86 server)
+CLOUD=2 NPU=0 bash scripts/run_so101.sh
+
+# Local encode + NPU (no cloud upload)
+CLOUD=0 NPU=1 bash scripts/run_so101.sh
+
+# Cloud encoded with NPU
+CLOUD=3 NPU=1 bash scripts/run_so101.sh
 ```
 
 **Manual Two-Terminal Method (Alternative):**
@@ -270,7 +303,7 @@ bash scripts/run_so101_inference.sh --dataset ~/DoRobot/dataset/so101-test --mod
 SINGLE_TASK="Pick up the red cube" bash scripts/run_so101_inference.sh
 
 # Disable NPU (for non-Ascend hardware)
-USE_NPU=0 bash scripts/run_so101_inference.sh
+NPU=0 bash scripts/run_so101_inference.sh
 ```
 
 **Default Paths:**
@@ -303,11 +336,21 @@ python operating_platform/core/inference.py \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONDA_ENV` | `dorobot` | Conda environment name |
+| `CLOUD` | `2` | Cloud mode: 0=local, 1=cloud raw, 2=edge, 3=cloud encoded |
+| `NPU` | `1` | Set to `0` to disable Ascend NPU |
 | `REPO_ID` | `so101-test` | Dataset repository ID |
-| `SINGLE_TASK` | `start and test so101 arm.` | Task description |
-| `USE_NPU` | `0` | Set to `1` for Ascend NPU support |
+| `SINGLE_TASK` | `start and test...` | Task description |
+| `CONDA_ENV` | `dorobot` | Conda environment name |
 | `ASCEND_TOOLKIT_PATH` | `/usr/local/Ascend/ascend-toolkit` | CANN toolkit path |
+
+**CLOUD Modes:**
+
+| CLOUD | Mode | Encoding | Upload | Training |
+|-------|------|----------|--------|----------|
+| 0 | Local only | Local | None | None |
+| 1 | Cloud raw | Cloud | Raw images | Cloud |
+| 2 | Edge | Edge server | Raw images | Cloud |
+| 3 | Cloud encoded | Local | Encoded videos | Cloud |
 
 ## Project Structure
 
