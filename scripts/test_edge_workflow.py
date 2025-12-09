@@ -78,10 +78,81 @@ def load_config_file():
             if "=" in line:
                 key, _, value = line.partition("=")
                 key = key.strip()
-                value = value.strip().strip('"').strip("'")
+
+                # Remove inline comments: VALUE="foo"  # comment
+                # First strip quotes, then remove anything after #
+                value = value.strip()
+
+                # Handle quoted values with inline comments
+                if value.startswith('"'):
+                    # Find closing quote
+                    end_quote = value.find('"', 1)
+                    if end_quote > 0:
+                        value = value[1:end_quote]  # Extract between quotes
+                    else:
+                        value = value.strip('"')
+                elif value.startswith("'"):
+                    end_quote = value.find("'", 1)
+                    if end_quote > 0:
+                        value = value[1:end_quote]
+                    else:
+                        value = value.strip("'")
+                else:
+                    # Unquoted value - remove inline comment
+                    if "#" in value:
+                        value = value.split("#")[0].strip()
 
                 if key not in os.environ:
                     os.environ[key] = value
+                    logger.debug(f"  {key}={value}")
+
+
+def extract_frames_with_ffmpeg(video_path: Path, output_dir: Path, max_frames: int) -> int:
+    """Extract frames using ffmpeg (supports AV1 and other codecs)"""
+    import subprocess
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get video info first
+    probe_cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-count_packets", "-show_entries", "stream=nb_read_packets",
+        "-of", "csv=p=0",
+        str(video_path)
+    ]
+
+    try:
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        frame_count = int(result.stdout.strip()) if result.stdout.strip() else 100
+    except Exception:
+        frame_count = 100  # Default estimate
+
+    # Calculate frame rate for extraction
+    step = max(1, frame_count // max_frames)
+
+    # Use ffmpeg to extract frames
+    output_pattern = str(output_dir / "frame_%06d.jpg")
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vf", f"select='not(mod(n,{step}))'",
+        "-vsync", "vfr",
+        "-frames:v", str(max_frames),
+        "-q:v", "2",  # High quality JPEG
+        output_pattern
+    ]
+
+    try:
+        subprocess.run(ffmpeg_cmd, capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        logger.warning(f"FFmpeg timeout for {video_path}")
+    except Exception as e:
+        logger.warning(f"FFmpeg error for {video_path}: {e}")
+
+    # Count extracted frames
+    extracted = len(list(output_dir.glob("frame_*.jpg")))
+    return extracted
 
 
 def extract_frames_from_videos(
@@ -92,16 +163,11 @@ def extract_frames_from_videos(
 ) -> dict:
     """
     Extract frames from video files to create raw image dataset.
+    Uses ffmpeg for better codec support (AV1, H.265, etc.)
 
     Returns:
         dict with extraction stats
     """
-    try:
-        import cv2
-    except ImportError:
-        logger.error("OpenCV required. Install with: pip install opencv-python")
-        return None
-
     videos_dir = source_dir / "videos"
     if not videos_dir.exists():
         logger.error(f"Videos directory not found: {videos_dir}")
@@ -130,9 +196,23 @@ def extract_frames_from_videos(
         "cameras": set(),
     }
 
+    # Check if ffmpeg is available
+    import subprocess
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        use_ffmpeg = True
+        logger.info("Using ffmpeg for video extraction (better codec support)")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        use_ffmpeg = False
+        logger.info("Using OpenCV for video extraction")
+        try:
+            import cv2
+        except ImportError:
+            logger.error("Neither ffmpeg nor OpenCV available")
+            return None
+
     for video_path in video_files:
         # Parse episode info from path
-        # videos/chunk-000/observation.image/episode_000001.mp4
         episode_name = video_path.stem  # episode_000001
         camera_name = video_path.parent.name  # observation.image
 
@@ -142,40 +222,45 @@ def extract_frames_from_videos(
 
         stats["cameras"].add(camera_name)
 
-        # Extract frames
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            logger.warning(f"Cannot open video: {video_path}")
-            continue
+        if use_ffmpeg:
+            # Use ffmpeg (supports AV1, H.265, etc.)
+            saved = extract_frames_with_ffmpeg(video_path, episode_dir, max_frames_per_episode)
+        else:
+            # Fallback to OpenCV
+            import cv2
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                logger.warning(f"Cannot open video: {video_path}")
+                continue
 
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            step = max(1, frame_count // max_frames_per_episode)
 
-        # Calculate step to get max_frames_per_episode frames
-        step = max(1, frame_count // max_frames_per_episode)
+            frame_idx = 0
+            saved = 0
 
-        frame_idx = 0
-        saved = 0
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+                if frame_idx % step == 0 and saved < max_frames_per_episode:
+                    img_path = episode_dir / f"frame_{saved:06d}.jpg"
+                    cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    saved += 1
 
-            if frame_idx % step == 0 and saved < max_frames_per_episode:
-                img_path = episode_dir / f"frame_{saved:06d}.jpg"
-                cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                stats["total_size_bytes"] += img_path.stat().st_size
-                saved += 1
+                frame_idx += 1
 
-            frame_idx += 1
+            cap.release()
 
-        cap.release()
+        # Calculate size of extracted frames
+        for img_path in episode_dir.glob("frame_*.jpg"):
+            stats["total_size_bytes"] += img_path.stat().st_size
 
         stats["episodes"] += 1
         stats["total_frames"] += saved
 
-        logger.info(f"  {episode_name}: extracted {saved} frames from {frame_count} total")
+        logger.info(f"  {episode_name}: extracted {saved} frames")
 
     stats["cameras"] = list(stats["cameras"])
 

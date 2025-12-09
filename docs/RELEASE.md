@@ -4,6 +4,40 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.77 (2025-12-09) - Fix Config Parsing and AV1 Video Support
+
+### Summary
+Fixed config file parsing to handle inline comments, and added ffmpeg-based video extraction for AV1/H.265 codec support.
+
+### Bug Fixes
+
+1. **Config parsing with inline comments**: Values like `HOST="127.0.0.1"  # comment` were parsed incorrectly, including the comment
+   - Now properly extracts only the quoted value
+   - Handles both single and double quotes
+
+2. **AV1 video codec not supported**: OpenCV couldn't decode AV1-encoded videos on many platforms
+   - Now uses ffmpeg for frame extraction (better codec support)
+   - Falls back to OpenCV if ffmpeg not available
+   - Supports AV1, H.265, and other modern codecs
+
+### Changes
+
+**scripts/test_edge_workflow.py**
+- `load_config_file()`: Fixed parsing to handle inline comments after quoted values
+- `extract_frames_with_ffmpeg()`: New function using ffmpeg for video extraction
+- `extract_frames_from_videos()`: Auto-detects ffmpeg, falls back to OpenCV
+
+### Config File Format
+
+Correct format (inline comments OK):
+```bash
+EDGE_SERVER_HOST="127.0.0.1"        # Server IP
+EDGE_SERVER_USER="ubuntu"           # SSH user
+EDGE_SERVER_PASSWORD="mypassword"   # SSH password
+```
+
+---
+
 ## v0.2.76 (2025-12-08) - Fix Edge API URL and Workflow Error Handling
 
 ### Summary
