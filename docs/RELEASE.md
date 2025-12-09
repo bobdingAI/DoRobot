@@ -4,6 +4,17 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.82 (2025-12-09) - Add python-socketio to setup script
+
+### Summary
+Added explicit `pip install python-socketio` to setup_env.sh for ZeroMQ communication support.
+
+### Changes
+- Added Step 7.5 to install python-socketio in setup_env.sh
+- portaudio19-dev already present in apt install section
+
+---
+
 ## v0.2.81 (2025-12-09) - Slim Core Dependencies for Faster Installation
 
 ### Summary

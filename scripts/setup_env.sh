@@ -337,6 +337,10 @@ main() {
     log_step "Ensuring OpenCV with GUI support..."
     pip install opencv-python
 
+    # Step 7.5: Install python-socketio for ZeroMQ communication
+    log_step "Installing python-socketio..."
+    pip install python-socketio
+
     # Note: Rerun SDK is optional - only needed for visualization
     # Install manually if needed: pip install rerun-sdk
 
