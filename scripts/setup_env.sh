@@ -131,6 +131,7 @@ print_usage() {
     echo ""
     echo "Dependency Groups:"
     echo "  (none)            Core only - data collection, robot control (fastest install)"
+    echo "  server            + flask, gevent, socketio (for web UI, visualization)"
     echo "  training          + diffusers, wandb, matplotlib, numba (for policy training)"
     echo "  simulation        + gymnasium, pymunk, gym-pusht (for simulation envs)"
     echo "  tensorflow        + tensorflow, tensorflow-datasets (for TF dataset formats)"
