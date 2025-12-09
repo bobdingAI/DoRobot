@@ -50,9 +50,10 @@ DEFAULT_FPS = 30
 _cloud_credentials = None
 
 # Cloud offload modes
-OFFLOAD_LOCAL = 0       # Encode locally, upload videos to cloud
-OFFLOAD_CLOUD = 1       # Skip encoding, upload raw images to cloud
-OFFLOAD_EDGE = 2        # Skip encoding, rsync to edge server for encoding
+OFFLOAD_LOCAL = 0           # Encode locally, NO upload (local only)
+OFFLOAD_CLOUD_RAW = 1       # Skip encoding, upload raw images to cloud for encoding
+OFFLOAD_EDGE = 2            # Skip encoding, rsync to edge server for encoding
+OFFLOAD_CLOUD_ENCODED = 3   # Encode locally, upload encoded videos to cloud for training
 
 
 def test_edge_connection() -> bool:
@@ -273,7 +274,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     cloud_offload = getattr(cfg.record, 'cloud_offload', OFFLOAD_LOCAL)
     # Convert boolean to int for backward compatibility
     if isinstance(cloud_offload, bool):
-        cloud_offload = OFFLOAD_CLOUD if cloud_offload else OFFLOAD_LOCAL
+        cloud_offload = OFFLOAD_CLOUD_RAW if cloud_offload else OFFLOAD_LOCAL
 
     # Model output path (used by cloud training)
     dorobot_home = Path.home() / "DoRobot"
@@ -321,8 +322,9 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     }
 
     # 创建记录器一次，在整个session中复用
-    # Skip encoding if cloud_offload is 1 (cloud) or 2 (edge)
-    skip_encoding = cloud_offload in (OFFLOAD_CLOUD, OFFLOAD_EDGE)
+    # Skip encoding if cloud_offload is 1 (cloud raw) or 2 (edge) - they do encoding remotely
+    # Mode 0 (local) and mode 3 (cloud encoded) do local encoding
+    skip_encoding = cloud_offload in (OFFLOAD_CLOUD_RAW, OFFLOAD_EDGE)
 
     record_cfg = RecordConfig(
         fps=cfg.record.fps,
@@ -356,10 +358,24 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             logging.warning("=" * 50)
             offload_mode = OFFLOAD_LOCAL  # Fall back to local mode
 
-    elif offload_mode == OFFLOAD_CLOUD:
+    elif offload_mode == OFFLOAD_CLOUD_RAW:
         logging.info("=" * 50)
-        logging.info("CLOUD OFFLOAD MODE (CLOUD_OFFLOAD=1)")
+        logging.info("CLOUD RAW MODE (CLOUD_OFFLOAD=1)")
         logging.info("Video encoding will be skipped - raw images uploaded to cloud")
+        logging.info("=" * 50)
+
+        # Prompt for cloud login at startup
+        credentials = prompt_cloud_login()
+        if credentials is None:
+            logging.warning("=" * 50)
+            logging.warning("Cloud login failed or cancelled")
+            logging.warning("Data will be saved locally but NOT uploaded to cloud")
+            logging.warning("=" * 50)
+
+    elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+        logging.info("=" * 50)
+        logging.info("CLOUD ENCODED MODE (CLOUD_OFFLOAD=3)")
+        logging.info("Video encoding locally (NPU/CPU), then upload encoded videos to cloud")
         logging.info("=" * 50)
 
         # Prompt for cloud login at startup
@@ -410,8 +426,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         logging.info("- 'p' to proceed after environment reset")
         if offload_mode == OFFLOAD_EDGE:
             logging.info("- 'e' to stop and upload to edge server for encoding/training")
-        elif offload_mode == OFFLOAD_CLOUD:
-            logging.info("- 'e' to stop and upload to cloud for encoding/training")
+        elif offload_mode == OFFLOAD_CLOUD_RAW:
+            logging.info("- 'e' to stop and upload raw images to cloud for encoding/training")
+        elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+            logging.info("- 'e' to stop, encode locally, upload encoded videos to cloud for training")
         else:
             logging.info("- 'e' to stop recording, encode locally, and exit")
 
@@ -485,8 +503,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         # Voice prompt based on offload mode
                         if offload_mode == OFFLOAD_EDGE:
                             log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
-                        elif offload_mode == OFFLOAD_CLOUD:
+                        elif offload_mode == OFFLOAD_CLOUD_RAW:
                             log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
+                        elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+                            log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
                         else:
                             log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
@@ -551,8 +571,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                 logging.error(f"Local data preserved at: {upload_dataset_path}")
                                 log_say("Edge upload error. Local data saved.", play_sounds=True)
 
-                        elif offload_mode == OFFLOAD_CLOUD:
-                            # Cloud offload mode - direct upload to cloud
+                        elif offload_mode == OFFLOAD_CLOUD_RAW:
+                            # Cloud raw mode - upload raw images to cloud for encoding
                             logging.info(f"Local data saved at: {upload_dataset_path}")
 
                             # Check if we have valid credentials
@@ -590,6 +610,45 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
                                     log_say("Cloud training error. Local data saved.", play_sounds=True)
 
+                        elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+                            # Cloud encoded mode - local encoding done, upload encoded videos to cloud
+                            logging.info(f"Local data saved at: {upload_dataset_path}")
+
+                            # Check if we have valid credentials
+                            if _cloud_credentials is None:
+                                logging.warning("=" * 50)
+                                logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
+                                logging.warning(f"Local data preserved at: {upload_dataset_path}")
+                                logging.warning("=" * 50)
+                                log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                            else:
+                                dorobot_home = Path.home() / "DoRobot"
+                                model_output_path = dorobot_home / "model"
+                                model_output_path.mkdir(parents=True, exist_ok=True)
+
+                                try:
+                                    username, password = _cloud_credentials
+                                    success = run_cloud_training(
+                                        dataset_path=upload_dataset_path,
+                                        model_output_path=str(model_output_path),
+                                        username=username,
+                                        password=password,
+                                        timeout_minutes=120
+                                    )
+                                    if success:
+                                        logging.info("Cloud training completed!")
+                                        log_say("Training complete. Model downloaded.", play_sounds=True)
+                                    else:
+                                        logging.error("=" * 50)
+                                        logging.error("CLOUD TRAINING FAILED")
+                                        logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                        logging.error("=" * 50)
+                                        log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                except Exception as e:
+                                    logging.error(f"Cloud training error: {e}")
+                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                    log_say("Cloud training error. Local data saved.", play_sounds=True)
+
                         return
                 else:
                     logging.info("Reset timeout - auto-proceeding to next episode")
@@ -613,8 +672,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 # Voice prompt based on offload mode
                 if offload_mode == OFFLOAD_EDGE:
                     log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
-                elif offload_mode == OFFLOAD_CLOUD:
+                elif offload_mode == OFFLOAD_CLOUD_RAW:
                     log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
+                elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+                    log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
                 else:
                     log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
@@ -695,8 +756,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         traceback.print_exc()
                         log_say("Edge upload error. Local data saved.", play_sounds=True)
 
-                elif offload_mode == OFFLOAD_CLOUD:
-                    # Cloud offload mode - direct upload to cloud
+                elif offload_mode == OFFLOAD_CLOUD_RAW:
+                    # Cloud raw mode - upload raw images to cloud for encoding
                     logging.info(f"Local data saved at: {upload_dataset_path}")
 
                     # Check if we have valid credentials
@@ -716,6 +777,58 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         # Run cloud training
                         logging.info("="*50)
                         logging.info("Starting cloud training workflow...")
+                        logging.info("="*50)
+
+                        try:
+                            username, password = _cloud_credentials
+                            success = run_cloud_training(
+                                dataset_path=upload_dataset_path,
+                                model_output_path=str(model_output_path),
+                                username=username,
+                                password=password,
+                                timeout_minutes=120  # 2 hours timeout
+                            )
+
+                            if success:
+                                logging.info("="*50)
+                                logging.info("CLOUD TRAINING COMPLETED SUCCESSFULLY!")
+                                logging.info(f"Model downloaded to: {model_output_path}")
+                                logging.info("="*50)
+                                log_say("Training complete. Model downloaded.", play_sounds=True)
+                            else:
+                                logging.error("=" * 50)
+                                logging.error("CLOUD TRAINING FAILED")
+                                logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                logging.error("=" * 50)
+                                log_say("Cloud training failed. Local data saved.", play_sounds=True)
+
+                        except Exception as e:
+                            logging.error(f"Cloud training error: {e}")
+                            logging.error(f"Local data preserved at: {upload_dataset_path}")
+                            traceback.print_exc()
+                            log_say("Cloud training error. Local data saved.", play_sounds=True)
+
+                elif offload_mode == OFFLOAD_CLOUD_ENCODED:
+                    # Cloud encoded mode - local encoding done, upload encoded videos to cloud
+                    logging.info(f"Local data saved at: {upload_dataset_path}")
+
+                    # Check if we have valid credentials
+                    if _cloud_credentials is None:
+                        logging.warning("=" * 50)
+                        logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
+                        logging.warning(f"Local data preserved at: {upload_dataset_path}")
+                        logging.warning("=" * 50)
+                        log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                    else:
+                        # Model output path: sibling folder ~/DoRobot/model
+                        dorobot_home = Path.home() / "DoRobot"
+                        model_output_path = dorobot_home / "model"
+                        model_output_path.mkdir(parents=True, exist_ok=True)
+                        logging.info(f"Model output path: {model_output_path}")
+
+                        # Run cloud training (with encoded videos)
+                        logging.info("="*50)
+                        logging.info("Starting cloud training workflow (with encoded videos)...")
                         logging.info("="*50)
 
                         try:

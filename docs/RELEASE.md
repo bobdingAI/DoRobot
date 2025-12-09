@@ -4,10 +4,46 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
-## v0.2.78 (2025-12-09) - Fix Edge Workflow PNG Format and Add Logging
+## v0.2.79 (2025-12-09) - Add CLOUD_OFFLOAD=3 Mode (Local Encode → Cloud)
 
 ### Summary
-Fixed test_edge_workflow.py to output PNG format (required by encode_dataset.py) and added comprehensive logging to edge API endpoints for debugging 502 errors.
+Added CLOUD_OFFLOAD=3 mode: encode videos locally with NPU/CPU, then upload encoded videos to cloud for training. Also fixed test_edge_workflow.py PNG format and added edge API logging.
+
+### New Feature: CLOUD_OFFLOAD=3 (Cloud Encoded Mode)
+
+Added a fourth offload mode that combines local encoding with cloud training:
+- Encode videos locally using NPU or CPU (same as mode 0)
+- Upload encoded videos to cloud for training (same as mode 1/2 training flow)
+- Downloads trained model back to client
+
+**CLOUD_OFFLOAD Mode Summary:**
+
+| Value | Mode | Encoding | Upload | Training |
+|-------|------|----------|--------|----------|
+| 0 | Local Only | Local (NPU/CPU) | None | None |
+| 1 | Cloud Raw | Cloud server | Raw images | Cloud |
+| 2 | Edge | Edge server | Raw images | Cloud (via edge) |
+| 3 | Cloud Encoded | Local (NPU/CPU) | Encoded videos | Cloud |
+
+**Usage:**
+```bash
+# Cloud encoded mode (encode locally, upload encoded to cloud)
+CLOUD_OFFLOAD=3 bash scripts/run_so101.sh
+```
+
+### Changes
+
+**operating_platform/core/main.py**
+- Added `OFFLOAD_CLOUD_ENCODED = 3` constant
+- Renamed `OFFLOAD_CLOUD` to `OFFLOAD_CLOUD_RAW` for clarity
+- Updated `skip_encoding` logic: modes 0 and 3 do local encoding
+- Added mode 3 handling in startup, UI prompts, voice prompts
+- Added mode 3 upload/training flow in 'e' key handlers
+
+**scripts/run_so101.sh**
+- Added CLOUD_OFFLOAD=3 support in comments, logging, CLI args
+- Updated help text with all 4 modes
+- Updated runtime controls display for mode 3
 
 ### Bug Fixes
 

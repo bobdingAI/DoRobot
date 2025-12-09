@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.77"
+VERSION="0.2.79"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -68,9 +68,10 @@ ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
 # Cloud Offload Configuration
 # CLOUD_OFFLOAD modes:
-#   0 = Local encoding (use NPU or CPU to encode videos locally)
-#   1 = Cloud offload (upload raw images directly to cloud for encoding/training)
+#   0 = Local encoding (use NPU or CPU to encode videos locally, NO upload)
+#   1 = Cloud raw (upload raw images directly to cloud for encoding/training)
 #   2 = Edge offload (rsync raw images to edge server, edge encodes and uploads to cloud)
+#   3 = Cloud encoded (encode locally with NPU/CPU, upload encoded videos to cloud for training)
 # Edge mode (2) is fastest for LAN transfer, recommended when API server is on same network
 # Default is 2 (edge mode) - fastest for typical LAN setup
 CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-2}"
@@ -504,13 +505,15 @@ start_cli() {
     log_info "Running main.py with parameters:"
     log_info "  repo_id: $repo_id"
     log_info "  single_task: $single_task"
-    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+    if [ "$CLOUD_OFFLOAD" == "3" ]; then
+        log_info "  cloud_offload: cloud encoded mode (local encoding, upload encoded to cloud)"
+    elif [ "$CLOUD_OFFLOAD" == "2" ]; then
         log_info "  cloud_offload: edge mode (rsync to edge server)"
         log_info "  edge_server: $EDGE_SERVER_USER@$EDGE_SERVER_HOST:$EDGE_SERVER_PORT"
     elif [ "$CLOUD_OFFLOAD" == "1" ]; then
-        log_info "  cloud_offload: cloud mode (skip local video encoding)"
+        log_info "  cloud_offload: cloud raw mode (skip local video encoding)"
     else
-        log_info "  cloud_offload: disabled (local video encoding)"
+        log_info "  cloud_offload: disabled (local video encoding, no upload)"
     fi
 
     # Export edge server environment variables for edge_upload.py
@@ -519,6 +522,7 @@ start_cli() {
     export EDGE_SERVER_PASSWORD
     export EDGE_SERVER_PORT
     export EDGE_SERVER_PATH
+    export API_BASE_URL
 
     # Build command arguments
     local cmd_args=(
@@ -527,12 +531,15 @@ start_cli() {
         --record.single_task="$single_task"
     )
 
-    # Add cloud_offload based on mode (0=local, 1=cloud, 2=edge)
-    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+    # Add cloud_offload based on mode (0=local, 1=cloud raw, 2=edge, 3=cloud encoded)
+    if [ "$CLOUD_OFFLOAD" == "3" ]; then
+        # Cloud encoded mode - encode locally, upload encoded to cloud
+        cmd_args+=(--record.cloud_offload=3)
+    elif [ "$CLOUD_OFFLOAD" == "2" ]; then
         # Edge mode - pass integer 2
         cmd_args+=(--record.cloud_offload=2)
     elif [ "$CLOUD_OFFLOAD" == "1" ]; then
-        # Cloud mode - pass integer 1 (or true for backward compatibility)
+        # Cloud raw mode - pass integer 1
         cmd_args+=(--record.cloud_offload=1)
     fi
 
@@ -553,10 +560,11 @@ print_usage() {
     echo "  REPO_ID             Dataset repository ID (default: so101-test)"
     echo "  SINGLE_TASK         Task description (default: 'start and test so101 arm.')"
     echo "  USE_NPU             Ascend NPU support (default: 1, set to 0 to disable)"
-    echo "  CLOUD_OFFLOAD       Offload mode (default: 0):"
-    echo "                        0 = Local encoding (encode videos on client)"
-    echo "                        1 = Cloud mode (upload raw images to cloud)"
+    echo "  CLOUD_OFFLOAD       Offload mode (default: 2):"
+    echo "                        0 = Local only (encode videos locally, no upload)"
+    echo "                        1 = Cloud raw (upload raw images to cloud for encoding)"
     echo "                        2 = Edge mode (rsync to edge server, fastest for LAN)"
+    echo "                        3 = Cloud encoded (encode locally, upload encoded to cloud)"
     echo "  ASCEND_TOOLKIT_PATH Path to CANN toolkit (default: /usr/local/Ascend/ascend-toolkit)"
     echo "  DORA_INIT_DELAY     Seconds to wait for DORA to initialize (default: 5)"
     echo "  SOCKET_TIMEOUT      Seconds to wait for ZeroMQ sockets (default: 30)"
@@ -591,10 +599,13 @@ print_usage() {
     echo "  # Edge mode with custom server:"
     echo "  CLOUD_OFFLOAD=2 EDGE_SERVER_HOST=192.168.1.200 $0"
     echo ""
-    echo "  # Cloud mode (upload raw images directly to cloud):"
+    echo "  # Cloud raw mode (upload raw images directly to cloud):"
     echo "  CLOUD_OFFLOAD=1 $0"
     echo ""
-    echo "  # Local mode (encode videos locally with NPU/CPU):"
+    echo "  # Cloud encoded mode (encode locally, upload encoded to cloud):"
+    echo "  CLOUD_OFFLOAD=3 $0"
+    echo ""
+    echo "  # Local only mode (encode videos locally, no upload):"
     echo "  CLOUD_OFFLOAD=0 $0"
     echo ""
     echo "  # With persistent device paths (recommended for stability):"
@@ -670,21 +681,25 @@ main() {
     echo "  Controls:"
     echo "    'n'     - Save episode and start new one"
     echo "    'p'     - Proceed after robot reset"
-    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+    if [ "$CLOUD_OFFLOAD" == "3" ]; then
+        echo "    'e'     - Stop, encode locally, upload to cloud"
+    elif [ "$CLOUD_OFFLOAD" == "2" ]; then
         echo "    'e'     - Stop, rsync to edge server"
     elif [ "$CLOUD_OFFLOAD" == "1" ]; then
-        echo "    'e'     - Stop, upload to cloud, and train"
+        echo "    'e'     - Stop, upload raw to cloud, and train"
     else
-        echo "    'e'     - Stop recording and exit"
+        echo "    'e'     - Stop recording and exit (no upload)"
     fi
     echo "    Ctrl+C  - Emergency stop and exit"
     echo ""
-    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+    if [ "$CLOUD_OFFLOAD" == "3" ]; then
+        echo "  Mode: Cloud Encoded (local encode → cloud)"
+    elif [ "$CLOUD_OFFLOAD" == "2" ]; then
         echo "  Mode: Edge Upload (rsync to $EDGE_SERVER_HOST)"
     elif [ "$CLOUD_OFFLOAD" == "1" ]; then
-        echo "  Mode: Cloud Offload"
+        echo "  Mode: Cloud Raw (upload raw images)"
     else
-        echo "  Mode: Local Encoding"
+        echo "  Mode: Local Only (encode locally, no upload)"
     fi
     echo "=========================================="
     echo ""
