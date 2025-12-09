@@ -20,7 +20,7 @@ set -e
 CONDA_ENV="${CONDA_ENV:-dorobot}"
 
 # NPU Configuration - enabled by default for Orange Pi/Ascend hardware
-USE_NPU="${USE_NPU:-1}"
+NPU="${NPU:-1}"
 ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
 # Display Configuration
@@ -114,7 +114,7 @@ activate_env() {
 
 # Source Ascend NPU environment if needed
 setup_npu_env() {
-    if [ "$USE_NPU" == "1" ]; then
+    if [ "$NPU" == "1" ]; then
         log_step "Setting up Ascend NPU environment..."
         local set_env_script="$ASCEND_TOOLKIT_PATH/set_env.sh"
         if [ -f "$set_env_script" ]; then
@@ -290,7 +290,7 @@ print_usage() {
     echo "  CONDA_ENV           Conda environment (default: dorobot)"
     echo "  REPO_ID             Dataset name for default path (default: so101-test)"
     echo "  SINGLE_TASK         Task description for inference"
-    echo "  USE_NPU             Ascend NPU support (default: 1)"
+    echo "  NPU             Ascend NPU support (default: 1)"
     echo "  SHOW                Camera display (default: 1)"
     echo ""
     echo "Device Port Configuration:"

@@ -4,6 +4,45 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.80 (2025-12-09) - Simplified Parameter Names for International Users
+
+### Summary
+Renamed environment variables for better usability by non-English speakers: shorter, single-word parameter names.
+
+### Changes
+
+**Parameter Renames:**
+- `CLOUD_OFFLOAD` → `CLOUD` (values: 0, 1, 2, 3)
+- `USE_NPU` → `NPU` (values: 0, 1)
+
+**Files Updated:**
+- `scripts/run_so101.sh`: All references to CLOUD_OFFLOAD → CLOUD, USE_NPU → NPU
+- `scripts/run_so101_inference.sh`: USE_NPU → NPU
+- `README.md`: Updated all example commands and documentation
+- `~/.dorobot_device.conf`: Template updated with new parameter names
+
+### Usage Examples
+
+```bash
+# Cloud modes (CLOUD=0,1,2,3)
+CLOUD=0 bash scripts/run_so101.sh  # Local only
+CLOUD=1 bash scripts/run_so101.sh  # Cloud raw
+CLOUD=2 bash scripts/run_so101.sh  # Edge (default)
+CLOUD=3 bash scripts/run_so101.sh  # Cloud encoded
+
+# NPU options (NPU=0,1)
+NPU=0 bash scripts/run_so101.sh    # Disable NPU
+NPU=1 bash scripts/run_so101.sh    # Enable NPU (default)
+
+# Combined
+CLOUD=2 NPU=0 bash scripts/run_so101.sh
+```
+
+### Backward Compatibility
+The old parameter names (`CLOUD_OFFLOAD`, `USE_NPU`) are no longer recognized. Users must update their scripts and config files to use the new names.
+
+---
+
 ## v0.2.79 (2025-12-09) - Add CLOUD_OFFLOAD=3 Mode (Local Encode → Cloud)
 
 ### Summary
