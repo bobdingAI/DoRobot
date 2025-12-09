@@ -131,15 +131,14 @@ def extract_frames_with_ffmpeg(video_path: Path, output_dir: Path, max_frames: i
     # Calculate frame rate for extraction
     step = max(1, frame_count // max_frames)
 
-    # Use ffmpeg to extract frames
-    output_pattern = str(output_dir / "frame_%06d.jpg")
+    # Use ffmpeg to extract frames (PNG for encode_dataset.py compatibility)
+    output_pattern = str(output_dir / "frame_%06d.png")
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-i", str(video_path),
         "-vf", f"select='not(mod(n,{step}))'",
         "-vsync", "vfr",
         "-frames:v", str(max_frames),
-        "-q:v", "2",  # High quality JPEG
         output_pattern
     ]
 
@@ -151,7 +150,7 @@ def extract_frames_with_ffmpeg(video_path: Path, output_dir: Path, max_frames: i
         logger.warning(f"FFmpeg error for {video_path}: {e}")
 
     # Count extracted frames
-    extracted = len(list(output_dir.glob("frame_*.jpg")))
+    extracted = len(list(output_dir.glob("frame_*.png")))
     return extracted
 
 
@@ -213,11 +212,13 @@ def extract_frames_from_videos(
 
     for video_path in video_files:
         # Parse episode info from path
+        # videos/chunk-000/observation.image/episode_000001.mp4
         episode_name = video_path.stem  # episode_000001
         camera_name = video_path.parent.name  # observation.image
 
-        # Create episode directory
-        episode_dir = images_dir / episode_name / camera_name
+        # Create directory structure that encode_dataset.py expects:
+        # images/{camera_key}/{episode}/frame_*.png
+        episode_dir = images_dir / camera_name / episode_name
         episode_dir.mkdir(parents=True, exist_ok=True)
 
         stats["cameras"].add(camera_name)
@@ -245,8 +246,8 @@ def extract_frames_from_videos(
                     break
 
                 if frame_idx % step == 0 and saved < max_frames_per_episode:
-                    img_path = episode_dir / f"frame_{saved:06d}.jpg"
-                    cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    img_path = episode_dir / f"frame_{saved:06d}.png"
+                    cv2.imwrite(str(img_path), frame)
                     saved += 1
 
                 frame_idx += 1
@@ -254,7 +255,7 @@ def extract_frames_from_videos(
             cap.release()
 
         # Calculate size of extracted frames
-        for img_path in episode_dir.glob("frame_*.jpg"):
+        for img_path in episode_dir.glob("frame_*.png"):
             stats["total_size_bytes"] += img_path.stat().st_size
 
         stats["episodes"] += 1

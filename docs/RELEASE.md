@@ -4,6 +4,40 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.78 (2025-12-09) - Fix Edge Workflow PNG Format and Add Logging
+
+### Summary
+Fixed test_edge_workflow.py to output PNG format (required by encode_dataset.py) and added comprehensive logging to edge API endpoints for debugging 502 errors.
+
+### Bug Fixes
+
+1. **Wrong image format**: `test_edge_workflow.py` was extracting frames as JPEG but `encode_dataset.py` expects PNG
+   - Changed ffmpeg extraction from `.jpg` to `.png`
+   - Changed OpenCV fallback from `.jpg` to `.png`
+   - Updated file glob patterns to match `.png`
+
+### Improvements
+
+1. **Enhanced edge endpoint logging** in `data-platform/api.py`:
+   - Added detailed logging for `/edge/upload-complete` with repo_id and dataset_path
+   - Added directory structure inspection before encoding (camera directories, PNG/JPG counts)
+   - Added full traceback logging on encode/upload task failure
+   - Added detailed logging for `/edge/train` with status tracking
+
+### Changes
+
+**scripts/test_edge_workflow.py**
+- `extract_frames_with_ffmpeg()`: Output `.png` instead of `.jpg`
+- OpenCV fallback: Save as `.png` instead of `.jpg` with JPEG quality
+- File counting: Glob for `*.png` instead of `*.jpg`
+
+**data-platform/api.py**
+- `/edge/upload-complete`: Log directory structure before encoding
+- `/edge/train`: Log dataset path and status transitions
+- Error handling: Store traceback in status for debugging
+
+---
+
 ## v0.2.77 (2025-12-09) - Fix Config Parsing and AV1 Video Support
 
 ### Summary
