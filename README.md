@@ -57,6 +57,7 @@ bash scripts/setup_env.sh --all
 | Group | Packages | Use Case |
 |-------|----------|----------|
 | (none) | Core only | Data collection, robot control (fastest) |
+| `server` | flask, gevent, socketio | Web UI, visualization server |
 | `training` | diffusers, wandb, matplotlib, numba | Policy training |
 | `simulation` | gymnasium, pymunk, gym-pusht | Simulation environments |
 | `tensorflow` | tensorflow, tensorflow-datasets | TF dataset formats |

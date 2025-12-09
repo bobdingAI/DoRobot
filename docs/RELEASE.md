@@ -4,6 +4,47 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.81 (2025-12-09) - Slim Core Dependencies for Faster Installation
+
+### Summary
+Removed unused packages from core dependencies and moved web/server packages to optional `[server]` group. This speeds up installation for data collection use cases.
+
+### Removed from Core (not used in data collection)
+- `zarr` - Not used anywhere in codebase
+- `gevent` - Only used in server/test files
+- `flask`, `flask-cors`, `flask-socketio` - Only used in server/visualization
+- `python-socketio`, `websocket-client` - Only used in server
+- `schedule` - Only used in server/test files
+
+### New Optional Dependency Group
+```bash
+# Install server dependencies (for web UI, visualization)
+pip install -e ".[server]"
+```
+
+**`[server]` group includes:**
+- gevent, flask, flask-cors, flask-socketio
+- python-socketio, websocket-client, schedule
+
+### Impact
+- **~30-60 seconds faster** core installation
+- **~50+ fewer transitive dependencies** for data collection only
+- No impact on data collection, training, or inference functionality
+
+### Usage
+```bash
+# Data collection only (fastest)
+bash scripts/setup_env.sh
+
+# With server/visualization
+pip install -e ".[server]"
+
+# Everything
+pip install -e ".[all]"
+```
+
+---
+
 ## v0.2.80 (2025-12-09) - Simplified Parameter Names for International Users
 
 ### Summary
