@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.70"
+VERSION="0.2.71"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -38,6 +38,7 @@ CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
 # Edge Server Configuration (only used when CLOUD_OFFLOAD=2)
 EDGE_SERVER_HOST="${EDGE_SERVER_HOST:-192.168.1.100}"
 EDGE_SERVER_USER="${EDGE_SERVER_USER:-dorobot}"
+EDGE_SERVER_PASSWORD="${EDGE_SERVER_PASSWORD:-}"  # SSH password (uses paramiko if set)
 EDGE_SERVER_PORT="${EDGE_SERVER_PORT:-22}"
 EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"
 
@@ -490,6 +491,7 @@ start_cli() {
     # Export edge server environment variables for edge_upload.py
     export EDGE_SERVER_HOST
     export EDGE_SERVER_USER
+    export EDGE_SERVER_PASSWORD
     export EDGE_SERVER_PORT
     export EDGE_SERVER_PATH
 
@@ -537,6 +539,7 @@ print_usage() {
     echo "Edge Server Configuration (for CLOUD_OFFLOAD=2):"
     echo "  EDGE_SERVER_HOST    Edge server IP address (default: 192.168.1.100)"
     echo "  EDGE_SERVER_USER    SSH user on edge server (default: dorobot)"
+    echo "  EDGE_SERVER_PASSWORD SSH password for edge server (uses paramiko if set)"
     echo "  EDGE_SERVER_PORT    SSH port (default: 22)"
     echo "  EDGE_SERVER_PATH    Upload directory on edge server (default: /data/dorobot/uploads)"
     echo ""

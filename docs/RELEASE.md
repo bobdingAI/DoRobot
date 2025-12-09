@@ -4,6 +4,61 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.71 (2025-12-08) - Edge Upload Password Authentication
+
+### Summary
+Added password authentication support using paramiko for edge upload mode. This is simpler than SSH key authentication for initial setup.
+
+### Changes
+
+**operating_platform/core/edge_upload.py**
+- Added optional `paramiko` import for password authentication
+- Added `password` field to `EdgeConfig` dataclass
+- Added `EDGE_SERVER_PASSWORD` environment variable support
+- Added paramiko-based methods:
+  - `_use_paramiko()`: Check if password auth should be used
+  - `_get_ssh_client()`: Get/create paramiko SSH client
+  - `_get_sftp()`: Get/create SFTP client
+  - `_exec_remote_command()`: Execute commands via paramiko
+  - `_sftp_upload_directory()`: Recursive SFTP upload
+  - `close()`: Clean up SSH/SFTP connections
+- Updated `test_connection()`, `create_remote_directory()`, `sync_dataset()` to use paramiko when password is set
+- Falls back to rsync/SSH key auth when no password is set
+
+**scripts/run_so101.sh**
+- Added `EDGE_SERVER_PASSWORD` environment variable
+- Exports password to edge_upload.py
+- Updated usage documentation
+
+**data-platform/train.py** (separate repo)
+- Added edge server configuration constants:
+  - `EDGE_SERVER_HOST`
+  - `EDGE_SERVER_USER`
+  - `EDGE_SERVER_PASSWORD`
+  - `EDGE_SERVER_PORT`
+  - `EDGE_SERVER_PATH`
+
+### Usage
+
+```bash
+# Edge mode with password authentication
+CLOUD_OFFLOAD=2 EDGE_SERVER_PASSWORD=mypassword bash scripts/run_so101.sh
+
+# Or set all edge server settings
+CLOUD_OFFLOAD=2 \
+  EDGE_SERVER_HOST=192.168.1.200 \
+  EDGE_SERVER_USER=admin \
+  EDGE_SERVER_PASSWORD=secret \
+  bash scripts/run_so101.sh
+```
+
+### Notes
+- Password authentication uses paramiko SFTP (slower but simpler)
+- SSH key authentication uses rsync (faster for large datasets)
+- Install paramiko: `pip install paramiko`
+
+---
+
 ## v0.2.70 (2025-12-08) - Edge Upload Mode (CLOUD_OFFLOAD=2)
 
 ### Summary
