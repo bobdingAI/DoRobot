@@ -4,6 +4,40 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.88 (2025-12-09) - Add retry_edge_upload.py script
+
+### Summary
+Added script to retry edge upload for existing raw image datasets when initial upload fails.
+
+### Use Case
+When running with CLOUD=2 (edge mode), data is saved locally as raw images. If the edge upload fails (network issue, server down, etc.), this script can retry the upload without re-collecting data.
+
+### New File
+
+**scripts/retry_edge_upload.py**
+- Upload existing raw image datasets to edge server
+- Trigger encoding and training on edge server
+- Test connection before upload
+- Validates dataset has images before upload
+
+### Usage
+
+```bash
+# Upload dataset and trigger training
+python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id
+
+# Upload only (skip training)
+python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+
+# Test connection first
+python scripts/retry_edge_upload.py --test-connection
+
+# Custom repo ID (if different from folder name)
+python scripts/retry_edge_upload.py --dataset /path/to/data --repo-id custom_name
+```
+
+---
+
 ## v0.2.87 (2025-12-09) - Fix 2-minute startup delay in edge mode
 
 ### Summary
