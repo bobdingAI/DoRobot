@@ -406,10 +406,10 @@ def notify_edge_and_encode(repo_id: str) -> bool:
 
             logger.info(f"  Status: {current_status} {progress}")
 
-            if current_status == "ENCODED":
+            if current_status in ("ENCODED", "READY"):
                 logger.info("SUCCESS: Encoding completed")
                 return True
-            elif current_status in ("FAILED", "ERROR"):
+            elif current_status in ("FAILED", "ERROR", "ENCODING_FAILED"):
                 logger.error(f"FAILED: Encoding failed - {status.get('error', 'Unknown error')}")
                 return False
             elif current_status == "COMPLETED":
