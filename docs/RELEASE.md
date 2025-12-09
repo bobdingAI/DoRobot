@@ -4,6 +4,38 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.75 (2025-12-08) - Simplified Edge Upload Path
+
+### Summary
+Changed default edge server upload path from `/data/dorobot/uploads` to `/uploaded_data` for cleaner organization.
+
+### Changes
+
+- `EDGE_SERVER_PATH` default changed to `/uploaded_data`
+- Each upload creates subfolder: `/uploaded_data/{repo_id}/`
+- Updated in:
+  - `~/.dorobot_device.conf`
+  - `scripts/run_so101.sh`
+  - `operating_platform/core/edge_upload.py`
+
+### Remote Structure
+
+```
+/uploaded_data/
+  ├── test_edge_20251208_200120/
+  │   ├── images/
+  │   │   └── episode_000001/
+  │   │       └── observation.image/
+  │   │           ├── frame_000000.jpg
+  │   │           └── ...
+  │   └── meta/
+  │       └── info.json
+  └── test_edge_20251208_200530/
+      └── ...
+```
+
+---
+
 ## v0.2.74 (2025-12-08) - Full Edge Workflow Test Script
 
 ### Summary
