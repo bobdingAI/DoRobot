@@ -4,6 +4,50 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.84 (2025-12-09) - Fix cloud_offload type from bool to int
+
+### Summary
+Fixed draccus config parsing error when using CLOUD environment variable. Changed `cloud_offload` field type from `bool` to `int` to support all 4 modes (0,1,2,3).
+
+### Problem
+Running `CLOUD=2 bash scripts/run_so101.sh` failed with:
+```
+draccus.utils.DecodingError: `record.cloud_offload`: Couldn't parse `2` into a bool
+```
+
+### Root Cause
+In v0.2.80, we renamed `CLOUD_OFFLOAD` to `CLOUD` with values 0,1,2,3, but `RecordConfig.cloud_offload` was still typed as `bool`.
+
+### Solution
+Changed the field type and added derived `skip_encoding` boolean:
+
+**operating_platform/core/record.py**
+```python
+# RecordConfig dataclass
+cloud_offload: int = 0  # Was: bool = False
+
+# Record.__init__
+self.cloud_offload = getattr(record_cfg, 'cloud_offload', 0)
+# Skip encoding for modes 1 (cloud raw) and 2 (edge) - they do encoding remotely
+# Modes 0 (local) and 3 (cloud encoded) do local encoding
+self.skip_encoding = self.cloud_offload in (1, 2)
+
+# Record.save() method
+if skip_encoding is None:
+    skip_encoding = self.skip_encoding
+```
+
+### Skip Encoding Logic
+
+| CLOUD | Mode | Skip Encoding | Encoding Location |
+|-------|------|---------------|-------------------|
+| 0 | Local only | False | Local (NPU/CPU) |
+| 1 | Cloud raw | True | Cloud server |
+| 2 | Edge | True | Edge server |
+| 3 | Cloud encoded | False | Local (NPU/CPU) |
+
+---
+
 ## v0.2.83 (2025-12-09) - Pin setuptools version
 
 ### Summary

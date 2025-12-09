@@ -113,10 +113,12 @@ class RecordConfig():
     # Maximum retry attempts for failed saves
     async_save_max_retries: int = 3
 
-    # Cloud offload mode: skip local video encoding, upload raw images to cloud for encoding/training
-    # When True, all saves will skip video encoding (for edge devices like Orange Pi with slow encoding)
-    # When False, normal local video encoding is performed
-    cloud_offload: bool = False
+    # Cloud offload mode (CLOUD environment variable):
+    #   0 = Local only (encode locally, no upload)
+    #   1 = Cloud raw (skip encoding, upload raw images to cloud)
+    #   2 = Edge (skip encoding, rsync to edge server)
+    #   3 = Cloud encoded (encode locally, upload encoded to cloud)
+    cloud_offload: int = 0
 
     record_cmd = None
 
@@ -143,8 +145,11 @@ class Record:
         self.use_async_save = getattr(record_cfg, 'use_async_save', True)  # Default to True
         self.async_saver = None
 
-        # Cloud offload mode: skip video encoding for all saves
-        self.cloud_offload = getattr(record_cfg, 'cloud_offload', False)
+        # Cloud offload mode: 0=local, 1=cloud raw, 2=edge, 3=cloud encoded
+        self.cloud_offload = getattr(record_cfg, 'cloud_offload', 0)
+        # Skip encoding for modes 1 (cloud raw) and 2 (edge) - they do encoding remotely
+        # Modes 0 (local) and 3 (cloud encoded) do local encoding
+        self.skip_encoding = self.cloud_offload in (1, 2)
         if self.use_async_save:
             max_queue_size = getattr(record_cfg, 'async_save_queue_size', 10)
             self.async_saver = AsyncEpisodeSaver(max_queue_size=max_queue_size)
@@ -356,12 +361,12 @@ class Record:
 
         Args:
             skip_encoding: If True, skip video encoding and keep raw PNG images.
-                          If None (default), uses self.cloud_offload setting.
+                          If None (default), uses self.skip_encoding setting.
                           Used for cloud offload mode where encoding is done on server.
         """
-        # Use cloud_offload setting if skip_encoding not explicitly specified
+        # Use skip_encoding setting if not explicitly specified
         if skip_encoding is None:
-            skip_encoding = self.cloud_offload
+            skip_encoding = self.skip_encoding
 
         if self.use_async_save:
             return self.save_async(skip_encoding=skip_encoding)
