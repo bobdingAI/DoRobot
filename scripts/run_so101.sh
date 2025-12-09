@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.74"
+VERSION="0.2.75"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -80,7 +80,7 @@ EDGE_SERVER_HOST="${EDGE_SERVER_HOST:-127.0.0.1}"
 EDGE_SERVER_USER="${EDGE_SERVER_USER:-nupylot}"
 EDGE_SERVER_PASSWORD="${EDGE_SERVER_PASSWORD:-}"  # SSH password (uses paramiko if set)
 EDGE_SERVER_PORT="${EDGE_SERVER_PORT:-22}"
-EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"
+EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/uploaded_data}"
 
 # API Server Configuration (for cloud training)
 API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8000}"
@@ -566,7 +566,7 @@ print_usage() {
     echo "  EDGE_SERVER_USER    SSH user on edge server (default: dorobot)"
     echo "  EDGE_SERVER_PASSWORD SSH password for edge server (uses paramiko if set)"
     echo "  EDGE_SERVER_PORT    SSH port (default: 22)"
-    echo "  EDGE_SERVER_PATH    Upload directory on edge server (default: /data/dorobot/uploads)"
+    echo "  EDGE_SERVER_PATH    Upload directory on edge server (default: /uploaded_data)"
     echo ""
     echo "Device Port Configuration (for stable operation):"
     echo "  CAMERA_TOP_PATH     Camera top path or index (default: 0)"

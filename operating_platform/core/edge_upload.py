@@ -43,7 +43,7 @@ DEFAULT_EDGE_HOST = os.environ.get("EDGE_SERVER_HOST", "192.168.1.100")
 DEFAULT_EDGE_USER = os.environ.get("EDGE_SERVER_USER", "dorobot")
 DEFAULT_EDGE_PASSWORD = os.environ.get("EDGE_SERVER_PASSWORD", "")
 DEFAULT_EDGE_PORT = int(os.environ.get("EDGE_SERVER_PORT", "22"))
-DEFAULT_EDGE_PATH = os.environ.get("EDGE_SERVER_PATH", "/data/dorobot/uploads")
+DEFAULT_EDGE_PATH = os.environ.get("EDGE_SERVER_PATH", "/uploaded_data")
 DEFAULT_EDGE_API_URL = os.environ.get("EDGE_API_URL", "http://192.168.1.100:8000")
 
 
