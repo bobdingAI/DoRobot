@@ -70,7 +70,8 @@ def test_edge_connection() -> bool:
     logging.info(f"Remote path: {config.remote_path}")
 
     uploader = EdgeUploader(config)
-    if uploader.test_connection():
+    # Use quick_test=True for faster startup (5s timeout instead of 30s+60s)
+    if uploader.test_connection(quick_test=True):
         logging.info("Edge server connection successful!")
         return True
     else:

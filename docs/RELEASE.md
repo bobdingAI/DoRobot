@@ -4,6 +4,42 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.87 (2025-12-09) - Fix 2-minute startup delay in edge mode
+
+### Summary
+Fixed 2-minute delay at "All systems ready!" screen when edge server connection test times out or fails.
+
+### Problem
+In edge mode (CLOUD=2), the system was stuck at "All systems ready!" for ~2 minutes before continuing. This was caused by SSH connection test using long timeouts (30s connect + 60s command timeout).
+
+### Root Cause
+`test_edge_connection()` in main.py calls `uploader.test_connection()` which uses 30-second SSH connect timeout and 60-second command timeout. When the edge server is unreachable, these timeouts add up.
+
+### Solution
+Added `quick_test` parameter to `EdgeUploader.test_connection()`:
+- `quick_test=True`: Use 5-second timeout for startup checks
+- `quick_test=False`: Use normal 30-second timeout for actual operations
+
+Updated `test_edge_connection()` in main.py to use `quick_test=True` for the startup connection check.
+
+### Changes
+
+**operating_platform/core/edge_upload.py**
+- Added `quick_test: bool = False` parameter to `test_connection()`
+- When `quick_test=True`, uses 5-second timeout for both SSH connect and command
+- Creates separate paramiko client for quick test to avoid affecting main connection
+
+**operating_platform/core/main.py**
+- Changed `uploader.test_connection()` to `uploader.test_connection(quick_test=True)`
+- Added comment explaining the timeout reduction
+
+### Expected Behavior
+- Startup delay reduced from ~2 minutes to ~5 seconds when edge server is unreachable
+- No impact on actual upload operations (still use normal timeouts)
+- Clear "Edge server connection failed!" message after 5 seconds instead of 2 minutes
+
+---
+
 ## v0.2.86 (2025-12-09) - Fix USB port increment issue with improved cleanup
 
 ### Summary

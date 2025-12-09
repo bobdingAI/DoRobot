@@ -169,20 +169,47 @@ class EdgeUploader:
                 pass
             self._ssh_client = None
 
-    def test_connection(self) -> bool:
-        """Test SSH connection to edge server"""
-        log(f"Testing connection to {self.config.user}@{self.config.host}:{self.config.port}...")
+    def test_connection(self, quick_test: bool = False) -> bool:
+        """
+        Test SSH connection to edge server.
+
+        Args:
+            quick_test: If True, use shorter timeouts (5s) for startup checks.
+                       If False, use normal timeouts for actual operations.
+        """
+        timeout = 5 if quick_test else 30
+        log(f"Testing connection to {self.config.user}@{self.config.host}:{self.config.port} (timeout={timeout}s)...")
 
         # Use paramiko if password is set
         if self._use_paramiko():
             try:
-                exit_code, stdout, stderr = self._exec_remote_command("echo SSH_OK")
-                if exit_code == 0 and "SSH_OK" in stdout:
+                # For quick test, create a new client with short timeout
+                if quick_test:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(
+                        hostname=self.config.host,
+                        port=self.config.port,
+                        username=self.config.user,
+                        password=self.config.password,
+                        timeout=timeout,
+                        allow_agent=False,
+                        look_for_keys=False,
+                    )
+                    stdin, stdout, stderr = ssh.exec_command("echo SSH_OK", timeout=timeout)
+                    exit_code = stdout.channel.recv_exit_status()
+                    stdout_str = stdout.read().decode()
+                    stderr_str = stderr.read().decode()
+                    ssh.close()
+                else:
+                    exit_code, stdout_str, stderr_str = self._exec_remote_command("echo SSH_OK")
+
+                if exit_code == 0 and "SSH_OK" in stdout_str:
                     log("SSH connection successful (paramiko)")
                     self._connected = True
                     return True
                 else:
-                    log(f"SSH connection failed: {stderr}")
+                    log(f"SSH connection failed: {stderr_str}")
                     return False
             except Exception as e:
                 log(f"SSH connection error: {e}")
@@ -196,7 +223,7 @@ class EdgeUploader:
                 ssh_cmd,
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=timeout,
             )
 
             if result.returncode == 0 and "SSH OK" in result.stdout:
@@ -208,7 +235,7 @@ class EdgeUploader:
                 return False
 
         except subprocess.TimeoutExpired:
-            log("SSH connection timeout")
+            log(f"SSH connection timeout ({timeout}s)")
             return False
         except Exception as e:
             log(f"SSH connection error: {e}")
