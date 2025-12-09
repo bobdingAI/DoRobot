@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Retry edge upload for existing raw image datasets.
+Edge encode - Upload raw image datasets to edge server for encoding and training.
 
-Use this when CLOUD=2 data collection succeeded locally but edge upload failed.
-This script uploads existing raw images to edge server for encoding and training.
+Use this when CLOUD=2 data collection succeeded locally but edge upload failed,
+or when you want to manually trigger edge encoding for an existing dataset.
 
 Usage:
     # Upload dataset and trigger training
-    python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (no training)
-    python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
 
     # Test connection first
-    python scripts/retry_edge_upload.py --test-connection
+    python scripts/edge_encode.py --test-connection
 
     # Custom repo ID (if different from folder name)
-    python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_data --repo-id custom_name
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --repo-id custom_name
 
 Environment variables (from ~/.dorobot_device.conf):
     EDGE_SERVER_HOST     Edge server IP
@@ -395,16 +395,16 @@ def main():
         epilog="""
 Examples:
     # Upload and trigger training
-    python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (skip training)
-    python scripts/retry_edge_upload.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
 
     # Test connection first
-    python scripts/retry_edge_upload.py --test-connection
+    python scripts/edge_encode.py --test-connection
 
     # Custom repo ID
-    python scripts/retry_edge_upload.py --dataset /path/to/data --repo-id my_custom_name
+    python scripts/edge_encode.py --dataset /path/to/data --repo-id my_custom_name
         """,
     )
     parser.add_argument(
