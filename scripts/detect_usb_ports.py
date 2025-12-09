@@ -349,6 +349,67 @@ def set_device_permissions(video_devices: list, serial_devices: list):
     print(f"{'=' * 70}\n")
 
 
+def load_existing_config(config_path: str) -> dict:
+    """
+    Load existing config file and parse non-hardware fields.
+
+    Returns a dict of field_name -> value for fields we want to preserve.
+    Hardware fields (CAMERA_*, ARM_*) are NOT included - they will be updated.
+    """
+    preserved = {}
+
+    if not os.path.exists(config_path):
+        return preserved
+
+    # Fields to preserve (NOT hardware detection fields)
+    preserve_fields = [
+        "CLOUD", "NPU",
+        "EDGE_SERVER_HOST", "EDGE_SERVER_USER", "EDGE_SERVER_PASSWORD",
+        "EDGE_SERVER_PORT", "EDGE_SERVER_PATH",
+        "API_BASE_URL", "API_USERNAME", "API_PASSWORD",
+    ]
+
+    try:
+        with open(config_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                # Skip comments and empty lines
+                if not line or line.startswith("#"):
+                    continue
+
+                # Parse KEY="value" or KEY=value
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+
+                    if key in preserve_fields:
+                        # Remove quotes and inline comments
+                        value = value.strip()
+                        # Handle quoted values with inline comments
+                        if value.startswith('"'):
+                            # Find closing quote
+                            end_quote = value.find('"', 1)
+                            if end_quote > 0:
+                                value = value[1:end_quote]
+                            else:
+                                value = value[1:]
+                        elif value.startswith("'"):
+                            end_quote = value.find("'", 1)
+                            if end_quote > 0:
+                                value = value[1:end_quote]
+                            else:
+                                value = value[1:]
+                        else:
+                            # Unquoted value - take until space or comment
+                            value = value.split()[0] if value.split() else value
+
+                        preserved[key] = value
+    except Exception as e:
+        print(f"Warning: Could not read existing config: {e}")
+
+    return preserved
+
+
 def save_device_config(video_devices: list, serial_devices: list, output_path: str = None, set_chmod: bool = False):
     """
     Save device configuration to a shell config file.
@@ -364,9 +425,14 @@ def save_device_config(video_devices: list, serial_devices: list, output_path: s
     - Second video capture device = Wrist camera
     - First serial device = Leader arm
     - Second serial device = Follower arm
+
+    IMPORTANT: Preserves existing non-hardware fields (CLOUD, NPU, EDGE_*, API_*)
     """
     if output_path is None:
         output_path = os.path.expanduser("~/.dorobot_device.conf")
+
+    # Load existing config to preserve non-hardware fields
+    preserved = load_existing_config(output_path)
 
     # Use detected device paths, fall back to defaults if not found
     camera_top = video_devices[0]["path"] if len(video_devices) > 0 else "/dev/video0"
@@ -383,8 +449,8 @@ def save_device_config(video_devices: list, serial_devices: list, output_path: s
         "# This file is automatically sourced by run_so101.sh",
         "# Regenerate with: bash scripts/detect.sh",
         "#",
-        "# NOTE: Paths are based on DETECTED devices at generation time.",
-        "#       Re-run 'bash scripts/detect.sh' if devices change ports.",
+        "# NOTE: Hardware paths (CAMERA_*, ARM_*) are updated by detect.sh.",
+        "#       Other settings (CLOUD, NPU, EDGE_*, API_*) are preserved.",
         "",
         "# === Camera Configuration ===",
         f"# Top camera (detected: {video_devices[0]['path'] if len(video_devices) > 0 else 'NOT FOUND'})",
@@ -401,6 +467,41 @@ def save_device_config(video_devices: list, serial_devices: list, output_path: s
         f'ARM_FOLLOWER_PORT="{arm_follower}"',
         "",
     ]
+
+    # Add Cloud/NPU settings (preserved or defaults)
+    lines.extend([
+        "# === Cloud/Edge Upload Settings ===",
+        "# CLOUD modes:",
+        "#   0 = Local only (encode locally, no upload)",
+        "#   1 = Cloud raw (upload raw images to cloud)",
+        "#   2 = Edge (rsync to edge server)",
+        "#   3 = Cloud encoded (encode locally, upload to cloud)",
+        f'CLOUD="{preserved.get("CLOUD", "0")}"',
+        "",
+        "# NPU Configuration (for Ascend hardware)",
+        f'NPU="{preserved.get("NPU", "1")}"',
+        "",
+    ])
+
+    # Add Edge Server settings (preserved or defaults)
+    lines.extend([
+        "# === Edge Server Configuration (only for CLOUD=2 Edge encoding) ===",
+        f'EDGE_SERVER_HOST="{preserved.get("EDGE_SERVER_HOST", "192.168.0.12")}"',
+        f'EDGE_SERVER_USER="{preserved.get("EDGE_SERVER_USER", "dora")}"',
+        f'EDGE_SERVER_PASSWORD="{preserved.get("EDGE_SERVER_PASSWORD", "")}"',
+        f'EDGE_SERVER_PORT="{preserved.get("EDGE_SERVER_PORT", "22")}"',
+        f'EDGE_SERVER_PATH="{preserved.get("EDGE_SERVER_PATH", "/uploaded_data")}"',
+        "",
+    ])
+
+    # Add API Server settings (preserved or defaults)
+    lines.extend([
+        "# === API Server Configuration (for CLOUD=1 or 3 training) ===",
+        f'API_BASE_URL="{preserved.get("API_BASE_URL", "http://127.0.0.1:8000")}"',
+        f'API_USERNAME="{preserved.get("API_USERNAME", "")}"',
+        f'API_PASSWORD="{preserved.get("API_PASSWORD", "")}"',
+        "",
+    ])
 
     # Show all detected devices for reference
     lines.append("# === All Detected Devices ===")
@@ -429,6 +530,8 @@ def save_device_config(video_devices: list, serial_devices: list, output_path: s
     print("Device configuration saved!")
     print(f"{'=' * 70}")
     print(f"\nConfig file: {output_path}")
+    if preserved:
+        print(f"\nPreserved settings: {', '.join(preserved.keys())}")
     print("\nContents:")
     print("-" * 40)
     print(content)

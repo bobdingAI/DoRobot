@@ -4,6 +4,39 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.85 (2025-12-09) - Preserve config settings when running detect.sh
+
+### Summary
+Fixed detect.sh/detect_usb_ports.py to preserve existing non-hardware settings when updating device configuration.
+
+### Problem
+Running `bash scripts/detect.sh` would overwrite the entire `~/.dorobot_device.conf` file, removing user-configured settings like:
+- CLOUD, NPU
+- EDGE_SERVER_HOST, EDGE_SERVER_USER, EDGE_SERVER_PASSWORD, etc.
+- API_BASE_URL, API_USERNAME, API_PASSWORD
+
+### Solution
+Added `load_existing_config()` function that reads and preserves non-hardware fields before regenerating the config. Now detect.sh only updates hardware detection fields (CAMERA_*, ARM_*) while preserving all other settings.
+
+**Preserved fields:**
+- CLOUD, NPU
+- EDGE_SERVER_HOST, EDGE_SERVER_USER, EDGE_SERVER_PASSWORD, EDGE_SERVER_PORT, EDGE_SERVER_PATH
+- API_BASE_URL, API_USERNAME, API_PASSWORD
+
+**Updated fields (hardware detection):**
+- CAMERA_TOP_PATH, CAMERA_WRIST_PATH
+- ARM_LEADER_PORT, ARM_FOLLOWER_PORT
+
+### Changes
+
+**scripts/detect_usb_ports.py**
+- Added `load_existing_config()` function to parse and preserve non-hardware fields
+- Updated `save_device_config()` to call `load_existing_config()` first
+- Config now always includes CLOUD, NPU, EDGE_*, and API_* sections with preserved or default values
+- Shows "Preserved settings: ..." in output when fields are preserved
+
+---
+
 ## v0.2.84 (2025-12-09) - Fix cloud_offload type from bool to int
 
 ### Summary
