@@ -4,6 +4,69 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.72 (2025-12-08) - Device Config Default Values & Edge Upload Test
+
+### Summary
+Added support for loading default values from `~/.dorobot_device.conf` including edge server settings, API credentials, and cloud offload mode. Added test script for edge upload verification.
+
+### Changes
+
+**~/.dorobot_device.conf**
+- Added edge server configuration defaults:
+  - `EDGE_SERVER_HOST="127.0.0.1"`
+  - `EDGE_SERVER_USER="nupylot"`
+  - `EDGE_SERVER_PASSWORD` (for paramiko SFTP)
+  - `EDGE_SERVER_PORT="22"`
+  - `EDGE_SERVER_PATH="/data/dorobot/uploads"`
+- Added cloud offload default: `CLOUD_OFFLOAD="2"` (edge mode)
+- Added API server configuration:
+  - `API_BASE_URL`
+  - `API_USERNAME`
+  - `API_PASSWORD`
+
+**scripts/run_so101.sh**
+- Restructured to load config file BEFORE setting defaults
+- Config file values now become the defaults (not hardcoded values)
+- Precedence: environment variables > config file > script defaults
+- Added API_BASE_URL, API_USERNAME, API_PASSWORD variables
+- Version bumped to 0.2.72
+
+**scripts/test_edge_upload.py** (NEW)
+- Test script for edge upload functionality verification
+- Supports creating synthetic test datasets
+- Can extract frames from existing videos for testing
+- Tests SSH/SFTP connection with password authentication
+- Reports upload speed and success/failure status
+
+### Usage
+
+```bash
+# Test edge connection only
+python scripts/test_edge_upload.py --test-connection
+
+# Test upload with synthetic data
+python scripts/test_edge_upload.py
+
+# Test upload with existing dataset
+python scripts/test_edge_upload.py --dataset /path/to/dataset
+
+# Extract frames from videos and upload
+python scripts/test_edge_upload.py --extract-from /path/to/videos
+```
+
+### Config File Precedence
+
+Settings are applied in this order (later overrides earlier):
+1. Script defaults (fallback values in run_so101.sh)
+2. Config file (`~/.dorobot_device.conf`)
+3. Environment variables (command-line overrides)
+
+This means users can:
+- Set permanent defaults in `~/.dorobot_device.conf`
+- Override temporarily with environment variables
+
+---
+
 ## v0.2.71 (2025-12-08) - Edge Upload Password Authentication
 
 ### Summary
