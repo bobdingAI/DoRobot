@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.86"
+VERSION="0.2.90"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -72,7 +72,9 @@ ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 #   1 = Cloud raw (upload raw images to cloud for encoding)
 #   2 = Edge (rsync raw images to edge server)
 #   3 = Cloud encoded (encode locally, upload encoded to cloud)
+#   4 = Local raw (skip encoding, save raw images locally only)
 # Edge mode (2) is fastest for LAN transfer
+# Local raw (4) is useful for testing or later upload with edge_encode.py
 CLOUD="${CLOUD:-2}"
 
 # Edge Server Configuration (only used when CLOUD=2)
@@ -571,7 +573,9 @@ start_cli() {
     log_info "Running main.py with parameters:"
     log_info "  repo_id: $repo_id"
     log_info "  single_task: $single_task"
-    if [ "$CLOUD" == "3" ]; then
+    if [ "$CLOUD" == "4" ]; then
+        log_info "  cloud_offload: local raw mode (skip encoding, save raw images locally)"
+    elif [ "$CLOUD" == "3" ]; then
         log_info "  cloud_offload: cloud encoded mode (local encoding, upload encoded to cloud)"
     elif [ "$CLOUD" == "2" ]; then
         log_info "  cloud_offload: edge mode (rsync to edge server)"
@@ -597,8 +601,11 @@ start_cli() {
         --record.single_task="$single_task"
     )
 
-    # Add cloud_offload based on mode (0=local, 1=cloud raw, 2=edge, 3=cloud encoded)
-    if [ "$CLOUD" == "3" ]; then
+    # Add cloud_offload based on mode (0=local, 1=cloud raw, 2=edge, 3=cloud encoded, 4=local raw)
+    if [ "$CLOUD" == "4" ]; then
+        # Local raw mode - skip encoding, save raw images locally only
+        cmd_args+=(--record.cloud_offload=4)
+    elif [ "$CLOUD" == "3" ]; then
         # Cloud encoded mode - encode locally, upload encoded to cloud
         cmd_args+=(--record.cloud_offload=3)
     elif [ "$CLOUD" == "2" ]; then
@@ -631,6 +638,7 @@ print_usage() {
     echo "                        1 = Cloud raw (upload raw images to cloud for encoding)"
     echo "                        2 = Edge mode (rsync to edge server, fastest for LAN)"
     echo "                        3 = Cloud encoded (encode locally, upload encoded to cloud)"
+    echo "                        4 = Local raw (skip encoding, save raw images locally)"
     echo "  ASCEND_TOOLKIT_PATH Path to CANN toolkit (default: /usr/local/Ascend/ascend-toolkit)"
     echo "  DORA_INIT_DELAY     Seconds to wait for DORA to initialize (default: 5)"
     echo "  SOCKET_TIMEOUT      Seconds to wait for ZeroMQ sockets (default: 30)"
@@ -673,6 +681,9 @@ print_usage() {
     echo ""
     echo "  # Local only mode (encode videos locally, no upload):"
     echo "  CLOUD=0 $0"
+    echo ""
+    echo "  # Local raw mode (skip encoding, save raw images for later upload):"
+    echo "  CLOUD=4 $0"
     echo ""
     echo "  # With persistent device paths (recommended for stability):"
     echo "  CAMERA_TOP_PATH=\"/dev/v4l/by-path/...\" ARM_LEADER_PORT=\"/dev/serial/by-path/...\" $0"
@@ -747,7 +758,9 @@ main() {
     echo "  Controls:"
     echo "    'n'     - Save episode and start new one"
     echo "    'p'     - Proceed after robot reset"
-    if [ "$CLOUD" == "3" ]; then
+    if [ "$CLOUD" == "4" ]; then
+        echo "    'e'     - Stop, save raw images locally (use edge_encode.py later)"
+    elif [ "$CLOUD" == "3" ]; then
         echo "    'e'     - Stop, encode locally, upload to cloud"
     elif [ "$CLOUD" == "2" ]; then
         echo "    'e'     - Stop, rsync to edge server"
@@ -758,7 +771,9 @@ main() {
     fi
     echo "    Ctrl+C  - Emergency stop and exit"
     echo ""
-    if [ "$CLOUD" == "3" ]; then
+    if [ "$CLOUD" == "4" ]; then
+        echo "  Mode: Local Raw (save raw images, no encoding)"
+    elif [ "$CLOUD" == "3" ]; then
         echo "  Mode: Cloud Encoded (local encode → cloud)"
     elif [ "$CLOUD" == "2" ]; then
         echo "  Mode: Edge Upload (rsync to $EDGE_SERVER_HOST)"
