@@ -4,6 +4,59 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.90 (2025-12-09) - Add CLOUD=4 Local Raw Mode
+
+### Summary
+Added CLOUD=4 mode: skip encoding, save raw images locally only. Useful for testing or later upload with `edge_encode.py`.
+
+### New Feature: CLOUD=4 (Local Raw Mode)
+
+Added a fifth offload mode that saves raw images locally without any encoding or upload:
+- Skip video encoding entirely (save PNG images only)
+- No upload to edge or cloud servers
+- Use `edge_encode.py` later to upload and encode when ready
+
+**CLOUD Mode Summary:**
+
+| Value | Mode | Encoding | Upload | Training |
+|-------|------|----------|--------|----------|
+| 0 | Local Only | Local (NPU/CPU) | None | None |
+| 1 | Cloud Raw | Cloud server | Raw images | Cloud |
+| 2 | Edge | Edge server | Raw images | Cloud (via edge) |
+| 3 | Cloud Encoded | Local (NPU/CPU) | Encoded videos | Cloud |
+| 4 | Local Raw | None | None | None |
+
+**Usage:**
+```bash
+# Local raw mode (skip encoding, save raw images locally)
+CLOUD=4 bash scripts/run_so101.sh
+
+# Later, upload and encode with edge_encode.py
+python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
+```
+
+### Use Cases
+- Testing data collection without waiting for encoding
+- Debugging dataset structure before upload
+- Collecting data when edge/cloud servers are unavailable
+- Manual upload workflow with `edge_encode.py`
+
+### Changes
+
+**operating_platform/core/main.py**
+- Added `OFFLOAD_LOCAL_RAW = 4` constant
+- Updated `skip_encoding` logic: modes 1, 2, and 4 skip encoding
+- Added mode 4 handling in startup, UI prompts, voice prompts
+- Added mode 4 exit handler that shows path and `edge_encode.py` command
+
+**scripts/run_so101.sh**
+- Added CLOUD=4 support in comments, logging, CLI args
+- Updated help text with all 5 modes
+- Updated runtime controls display for mode 4
+- Version bumped to 0.2.90
+
+---
+
 ## v0.2.89 (2025-12-09) - Rename to edge_encode.py
 
 ### Summary

@@ -54,6 +54,7 @@ OFFLOAD_LOCAL = 0           # Encode locally, NO upload (local only)
 OFFLOAD_CLOUD_RAW = 1       # Skip encoding, upload raw images to cloud for encoding
 OFFLOAD_EDGE = 2            # Skip encoding, rsync to edge server for encoding
 OFFLOAD_CLOUD_ENCODED = 3   # Encode locally, upload encoded videos to cloud for training
+OFFLOAD_LOCAL_RAW = 4       # Skip encoding, save raw images locally only (for later edge_encode.py)
 
 
 def test_edge_connection() -> bool:
@@ -323,9 +324,9 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     }
 
     # 创建记录器一次，在整个session中复用
-    # Skip encoding if cloud_offload is 1 (cloud raw) or 2 (edge) - they do encoding remotely
+    # Skip encoding if cloud_offload is 1 (cloud raw), 2 (edge), or 4 (local raw)
     # Mode 0 (local) and mode 3 (cloud encoded) do local encoding
-    skip_encoding = cloud_offload in (OFFLOAD_CLOUD_RAW, OFFLOAD_EDGE)
+    skip_encoding = cloud_offload in (OFFLOAD_CLOUD_RAW, OFFLOAD_EDGE, OFFLOAD_LOCAL_RAW)
 
     record_cfg = RecordConfig(
         fps=cfg.record.fps,
@@ -387,6 +388,13 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             logging.warning("Data will be saved locally but NOT uploaded to cloud")
             logging.warning("=" * 50)
 
+    elif offload_mode == OFFLOAD_LOCAL_RAW:
+        logging.info("=" * 50)
+        logging.info("LOCAL RAW MODE (CLOUD=4)")
+        logging.info("Video encoding will be skipped - raw images saved locally only")
+        logging.info("Use 'python scripts/edge_encode.py' later to upload and encode")
+        logging.info("=" * 50)
+
     record = Record(
         fps=cfg.record.fps,
         robot=daemon.robot,
@@ -431,6 +439,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             logging.info("- 'e' to stop and upload raw images to cloud for encoding/training")
         elif offload_mode == OFFLOAD_CLOUD_ENCODED:
             logging.info("- 'e' to stop, encode locally, upload encoded videos to cloud for training")
+        elif offload_mode == OFFLOAD_LOCAL_RAW:
+            logging.info("- 'e' to stop and save raw images locally (use edge_encode.py later)")
         else:
             logging.info("- 'e' to stop recording, encode locally, and exit")
 
@@ -508,6 +518,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                             log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_ENCODED:
                             log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
+                        elif offload_mode == OFFLOAD_LOCAL_RAW:
+                            log_say(f"End collection. {total_episodes} episodes collected. Raw images saved locally.", play_sounds=True)
                         else:
                             log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
@@ -650,6 +662,16 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
                                     log_say("Cloud training error. Local data saved.", play_sounds=True)
 
+                        elif offload_mode == OFFLOAD_LOCAL_RAW:
+                            # Local raw mode - just save locally, no upload
+                            logging.info("="*50)
+                            logging.info("LOCAL RAW MODE - Data saved successfully")
+                            logging.info(f"Raw images saved at: {upload_dataset_path}")
+                            logging.info("="*50)
+                            logging.info("To upload and encode later, run:")
+                            logging.info(f"  python scripts/edge_encode.py --dataset {upload_dataset_path}")
+                            log_say("Raw images saved locally.", play_sounds=True)
+
                         return
                 else:
                     logging.info("Reset timeout - auto-proceeding to next episode")
@@ -677,6 +699,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                 elif offload_mode == OFFLOAD_CLOUD_ENCODED:
                     log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
+                elif offload_mode == OFFLOAD_LOCAL_RAW:
+                    log_say(f"End collection. {total_episodes} episodes collected. Raw images saved locally.", play_sounds=True)
                 else:
                     log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
 
@@ -860,6 +884,16 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                             logging.error(f"Local data preserved at: {upload_dataset_path}")
                             traceback.print_exc()
                             log_say("Cloud training error. Local data saved.", play_sounds=True)
+
+                elif offload_mode == OFFLOAD_LOCAL_RAW:
+                    # Local raw mode - just save locally, no upload
+                    logging.info("="*50)
+                    logging.info("LOCAL RAW MODE - Data saved successfully")
+                    logging.info(f"Raw images saved at: {upload_dataset_path}")
+                    logging.info("="*50)
+                    logging.info("To upload and encode later, run:")
+                    logging.info(f"  python scripts/edge_encode.py --dataset {upload_dataset_path}")
+                    log_say("Raw images saved locally.", play_sounds=True)
 
                 return
 
