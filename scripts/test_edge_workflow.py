@@ -458,24 +458,39 @@ def run_full_workflow(
 
         # Step 3: Notify edge server to encode
         logger.info("\n[Step 3/4] Triggering encoding on edge server...")
-        if not notify_edge_and_encode(repo_id):
-            logger.warning("Encoding notification may have failed, continuing...")
+        encode_ok = notify_edge_and_encode(repo_id)
+        if not encode_ok:
+            logger.error("Encoding notification failed")
 
         # Step 4: Trigger training
+        train_ok = True
         if not skip_training:
             logger.info("\n[Step 4/4] Triggering cloud training...")
-            if not trigger_training(repo_id):
-                logger.warning("Training trigger may have failed")
+            train_ok = trigger_training(repo_id)
+            if not train_ok:
+                logger.error("Training trigger failed")
         else:
             logger.info("\n[Step 4/4] Skipping training (--skip-training)")
 
+        # Report final status
+        edge_path = os.environ.get('EDGE_SERVER_PATH', '/uploaded_data')
         logger.info("\n" + "=" * 60)
-        logger.info("WORKFLOW COMPLETED SUCCESSFULLY")
-        logger.info("=" * 60)
-        logger.info(f"Repo ID: {repo_id}")
-        logger.info(f"Edge path: {os.environ.get('EDGE_SERVER_PATH', '/data/dorobot/uploads')}/{repo_id}/")
-
-        return True
+        if encode_ok and train_ok:
+            logger.info("WORKFLOW COMPLETED SUCCESSFULLY")
+            logger.info("=" * 60)
+            logger.info(f"Repo ID: {repo_id}")
+            logger.info(f"Edge path: {edge_path}/{repo_id}/")
+            return True
+        else:
+            logger.error("WORKFLOW FAILED")
+            logger.info("=" * 60)
+            logger.info(f"Repo ID: {repo_id}")
+            logger.info(f"Edge path: {edge_path}/{repo_id}/")
+            if not encode_ok:
+                logger.error("  - Encoding step failed")
+            if not train_ok:
+                logger.error("  - Training step failed")
+            return False
 
     finally:
         if not keep_temp:

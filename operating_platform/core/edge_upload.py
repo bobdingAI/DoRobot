@@ -39,12 +39,13 @@ except ImportError:
     PARAMIKO_AVAILABLE = False
 
 # Default configuration - can be overridden via environment variables
-DEFAULT_EDGE_HOST = os.environ.get("EDGE_SERVER_HOST", "192.168.1.100")
-DEFAULT_EDGE_USER = os.environ.get("EDGE_SERVER_USER", "dorobot")
+DEFAULT_EDGE_HOST = os.environ.get("EDGE_SERVER_HOST", "127.0.0.1")
+DEFAULT_EDGE_USER = os.environ.get("EDGE_SERVER_USER", "nupylot")
 DEFAULT_EDGE_PASSWORD = os.environ.get("EDGE_SERVER_PASSWORD", "")
 DEFAULT_EDGE_PORT = int(os.environ.get("EDGE_SERVER_PORT", "22"))
 DEFAULT_EDGE_PATH = os.environ.get("EDGE_SERVER_PATH", "/uploaded_data")
-DEFAULT_EDGE_API_URL = os.environ.get("EDGE_API_URL", "http://192.168.1.100:8000")
+# API URL defaults to same host as edge server
+DEFAULT_EDGE_API_URL = os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", "http://127.0.0.1:8000"))
 
 
 def log(message: str):

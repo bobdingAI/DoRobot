@@ -4,6 +4,34 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.76 (2025-12-08) - Fix Edge API URL and Workflow Error Handling
+
+### Summary
+Fixed edge upload API URL defaulting to wrong address and improved workflow error handling.
+
+### Bug Fixes
+
+1. **Wrong API URL**: `edge_upload.py` had hardcoded `http://192.168.1.100:8000` instead of using `API_BASE_URL` from config
+   - Now uses `API_BASE_URL` env var first, falls back to `EDGE_API_URL`, then `http://127.0.0.1:8000`
+
+2. **False Success on Failure**: `test_edge_workflow.py` reported "WORKFLOW COMPLETED SUCCESSFULLY" even when encoding or training failed
+   - Now properly tracks success/failure of each step
+   - Reports "WORKFLOW FAILED" with specific failed steps
+
+### Changes
+
+**operating_platform/core/edge_upload.py**
+- Changed default host from `192.168.1.100` to `127.0.0.1`
+- Changed default user from `dorobot` to `nupylot`
+- API URL now uses `API_BASE_URL` from environment (same as config file)
+
+**scripts/test_edge_workflow.py**
+- Track `encode_ok` and `train_ok` separately
+- Only report success if all steps pass
+- List which steps failed on error
+
+---
+
 ## v0.2.75 (2025-12-08) - Simplified Edge Upload Path
 
 ### Summary
