@@ -41,12 +41,41 @@ from operating_platform.core.record import Record, RecordConfig
 from operating_platform.core.replay import DatasetReplayConfig, ReplayConfig, replay
 from operating_platform.utils.camera_display import CameraDisplay
 from operating_platform.core.cloud_train import CloudTrainer, run_cloud_training
+from operating_platform.core.edge_upload import EdgeUploader, run_edge_upload, EdgeConfig
 import getpass
 
 DEFAULT_FPS = 30
 
 # Global cloud credentials (set at startup if CLOUD_OFFLOAD=1)
 _cloud_credentials = None
+
+# Cloud offload modes
+OFFLOAD_LOCAL = 0       # Encode locally, upload videos to cloud
+OFFLOAD_CLOUD = 1       # Skip encoding, upload raw images to cloud
+OFFLOAD_EDGE = 2        # Skip encoding, rsync to edge server for encoding
+
+
+def test_edge_connection() -> bool:
+    """
+    Test connection to edge server.
+    Returns True if connection successful.
+    """
+    logging.info("=" * 50)
+    logging.info("EDGE UPLOAD MODE - Testing Connection")
+    logging.info("=" * 50)
+
+    config = EdgeConfig.from_env()
+    logging.info(f"Edge server: {config.user}@{config.host}:{config.port}")
+    logging.info(f"Remote path: {config.remote_path}")
+
+    uploader = EdgeUploader(config)
+    if uploader.test_connection():
+        logging.info("Edge server connection successful!")
+        return True
+    else:
+        logging.error("Edge server connection failed!")
+        logging.error("Check EDGE_SERVER_HOST, EDGE_SERVER_USER, EDGE_SERVER_PORT environment variables")
+        return False
 
 
 def prompt_cloud_login():
@@ -240,8 +269,11 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     target_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Target directory: {target_dir}")
 
-    # Check if cloud_offload mode is enabled
-    cloud_offload = getattr(cfg.record, 'cloud_offload', False)
+    # Check cloud_offload mode: 0=local, 1=cloud, 2=edge
+    cloud_offload = getattr(cfg.record, 'cloud_offload', OFFLOAD_LOCAL)
+    # Convert boolean to int for backward compatibility
+    if isinstance(cloud_offload, bool):
+        cloud_offload = OFFLOAD_CLOUD if cloud_offload else OFFLOAD_LOCAL
 
     # Model output path (used by cloud training)
     dorobot_home = Path.home() / "DoRobot"
@@ -289,6 +321,9 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     }
 
     # 创建记录器一次，在整个session中复用
+    # Skip encoding if cloud_offload is 1 (cloud) or 2 (edge)
+    skip_encoding = cloud_offload in (OFFLOAD_CLOUD, OFFLOAD_EDGE)
+
     record_cfg = RecordConfig(
         fps=cfg.record.fps,
         repo_id=repo_id,
@@ -300,13 +335,30 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         async_save_queue_size=cfg.record.async_save_queue_size,
         async_save_timeout_s=cfg.record.async_save_timeout_s,
         async_save_max_retries=cfg.record.async_save_max_retries,
-        cloud_offload=getattr(cfg.record, 'cloud_offload', False),
+        cloud_offload=skip_encoding,  # True if cloud_offload is 1 or 2
     )
 
-    # Log cloud offload mode status and prompt for login
-    if record_cfg.cloud_offload:
+    # Track the actual offload mode (0, 1, or 2)
+    offload_mode = cloud_offload
+
+    # Log offload mode status and verify connection
+    if offload_mode == OFFLOAD_EDGE:
         logging.info("=" * 50)
-        logging.info("CLOUD OFFLOAD MODE ENABLED")
+        logging.info("EDGE UPLOAD MODE (CLOUD_OFFLOAD=2)")
+        logging.info("Video encoding will be skipped - raw images sent to edge server via rsync")
+        logging.info("=" * 50)
+
+        # Test edge server connection at startup
+        if not test_edge_connection():
+            logging.warning("=" * 50)
+            logging.warning("Edge server connection failed!")
+            logging.warning("Data will be saved locally but NOT uploaded to edge server")
+            logging.warning("=" * 50)
+            offload_mode = OFFLOAD_LOCAL  # Fall back to local mode
+
+    elif offload_mode == OFFLOAD_CLOUD:
+        logging.info("=" * 50)
+        logging.info("CLOUD OFFLOAD MODE (CLOUD_OFFLOAD=1)")
         logging.info("Video encoding will be skipped - raw images uploaded to cloud")
         logging.info("=" * 50)
 
@@ -356,8 +408,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         logging.info("Recording active. Press:")
         logging.info("- 'n' to save current episode and start new one")
         logging.info("- 'p' to proceed after environment reset")
-        if record.cloud_offload:
-            logging.info("- 'e' to stop recording and upload to cloud for training (cloud_offload=True)")
+        if offload_mode == OFFLOAD_EDGE:
+            logging.info("- 'e' to stop and upload to edge server for encoding/training")
+        elif offload_mode == OFFLOAD_CLOUD:
+            logging.info("- 'e' to stop and upload to cloud for encoding/training")
         else:
             logging.info("- 'e' to stop recording, encode locally, and exit")
 
@@ -428,8 +482,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         logging.info(f"Total episodes collected: {total_episodes}")
                         logging.info("=" * 50)
 
-                        # Voice prompt
-                        if record.cloud_offload:
+                        # Voice prompt based on offload mode
+                        if offload_mode == OFFLOAD_EDGE:
+                            log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
+                        elif offload_mode == OFFLOAD_CLOUD:
                             log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                         else:
                             log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
@@ -461,10 +517,42 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                        f"completed={final_status['stats']['total_completed']} "
                                        f"failed={final_status['stats']['total_failed']}")
 
-                        # Run cloud training if enabled and credentials available
-                        if record.cloud_offload:
-                            upload_dataset_path = str(target_dir)
-                            logging.info(f"Dataset path: {upload_dataset_path}")
+                        # Run upload/training based on offload mode
+                        upload_dataset_path = str(target_dir)
+                        logging.info(f"Dataset path: {upload_dataset_path}")
+
+                        if offload_mode == OFFLOAD_EDGE:
+                            # Edge upload mode - rsync to edge server
+                            logging.info("="*50)
+                            logging.info("Starting edge upload workflow...")
+                            logging.info("="*50)
+
+                            try:
+                                success = run_edge_upload(
+                                    dataset_path=upload_dataset_path,
+                                    repo_id=repo_id,
+                                    trigger_training=True,
+                                    wait_for_training=False,  # Don't block - edge server handles training
+                                )
+                                if success:
+                                    logging.info("="*50)
+                                    logging.info("EDGE UPLOAD COMPLETED!")
+                                    logging.info("Edge server will encode and upload to cloud")
+                                    logging.info("="*50)
+                                    log_say("Edge upload complete. Training will start on server.", play_sounds=True)
+                                else:
+                                    logging.error("=" * 50)
+                                    logging.error("EDGE UPLOAD FAILED")
+                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                    logging.error("=" * 50)
+                                    log_say("Edge upload failed. Local data saved.", play_sounds=True)
+                            except Exception as e:
+                                logging.error(f"Edge upload error: {e}")
+                                logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                log_say("Edge upload error. Local data saved.", play_sounds=True)
+
+                        elif offload_mode == OFFLOAD_CLOUD:
+                            # Cloud offload mode - direct upload to cloud
                             logging.info(f"Local data saved at: {upload_dataset_path}")
 
                             # Check if we have valid credentials
@@ -522,8 +610,10 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 logging.info(f"Total episodes collected: {total_episodes}")
                 logging.info("=" * 50)
 
-                # Voice prompt: different message based on cloud_offload mode
-                if record.cloud_offload:
+                # Voice prompt based on offload mode
+                if offload_mode == OFFLOAD_EDGE:
+                    log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
+                elif offload_mode == OFFLOAD_CLOUD:
                     log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
                 else:
                     log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
@@ -570,11 +660,43 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                f"completed={final_status['stats']['total_completed']} "
                                f"failed={final_status['stats']['total_failed']}")
 
-                # If cloud_offload mode, run cloud training
-                if record.cloud_offload:
-                    # Get dataset path for upload
-                    upload_dataset_path = str(target_dir)
-                    logging.info(f"Dataset path: {upload_dataset_path}")
+                # Run upload/training based on offload mode
+                upload_dataset_path = str(target_dir)
+                logging.info(f"Dataset path: {upload_dataset_path}")
+
+                if offload_mode == OFFLOAD_EDGE:
+                    # Edge upload mode - rsync to edge server
+                    logging.info("="*50)
+                    logging.info("Starting edge upload workflow...")
+                    logging.info("="*50)
+
+                    try:
+                        success = run_edge_upload(
+                            dataset_path=upload_dataset_path,
+                            repo_id=repo_id,
+                            trigger_training=True,
+                            wait_for_training=False,  # Don't block - edge server handles training
+                        )
+                        if success:
+                            logging.info("="*50)
+                            logging.info("EDGE UPLOAD COMPLETED!")
+                            logging.info("Edge server will encode and upload to cloud")
+                            logging.info("="*50)
+                            log_say("Edge upload complete. Training will start on server.", play_sounds=True)
+                        else:
+                            logging.error("=" * 50)
+                            logging.error("EDGE UPLOAD FAILED")
+                            logging.error(f"Local data preserved at: {upload_dataset_path}")
+                            logging.error("=" * 50)
+                            log_say("Edge upload failed. Local data saved.", play_sounds=True)
+                    except Exception as e:
+                        logging.error(f"Edge upload error: {e}")
+                        logging.error(f"Local data preserved at: {upload_dataset_path}")
+                        traceback.print_exc()
+                        log_say("Edge upload error. Local data saved.", play_sounds=True)
+
+                elif offload_mode == OFFLOAD_CLOUD:
+                    # Cloud offload mode - direct upload to cloud
                     logging.info(f"Local data saved at: {upload_dataset_path}")
 
                     # Check if we have valid credentials

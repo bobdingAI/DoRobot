@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.69"
+VERSION="0.2.70"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -28,8 +28,18 @@ USE_NPU="${USE_NPU:-1}"
 ASCEND_TOOLKIT_PATH="${ASCEND_TOOLKIT_PATH:-/usr/local/Ascend/ascend-toolkit}"
 
 # Cloud Offload Configuration - disabled by default (local encoding)
-# Set CLOUD_OFFLOAD=1 to upload raw images to cloud for encoding/training
+# CLOUD_OFFLOAD modes:
+#   0 = Local encoding (use NPU or CPU to encode videos locally)
+#   1 = Cloud offload (upload raw images directly to cloud for encoding/training)
+#   2 = Edge offload (rsync raw images to edge server, edge encodes and uploads to cloud)
+# Edge mode (2) is fastest for LAN transfer, recommended when API server is on same network
 CLOUD_OFFLOAD="${CLOUD_OFFLOAD:-0}"
+
+# Edge Server Configuration (only used when CLOUD_OFFLOAD=2)
+EDGE_SERVER_HOST="${EDGE_SERVER_HOST:-192.168.1.100}"
+EDGE_SERVER_USER="${EDGE_SERVER_USER:-dorobot}"
+EDGE_SERVER_PORT="${EDGE_SERVER_PORT:-22}"
+EDGE_SERVER_PATH="${EDGE_SERVER_PATH:-/data/dorobot/uploads}"
 
 # ===========================================================================
 # DEVICE PORT CONFIGURATION
@@ -468,9 +478,20 @@ start_cli() {
     log_info "Running main.py with parameters:"
     log_info "  repo_id: $repo_id"
     log_info "  single_task: $single_task"
-    if [ "$CLOUD_OFFLOAD" == "1" ]; then
-        log_info "  cloud_offload: enabled (skip local video encoding)"
+    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+        log_info "  cloud_offload: edge mode (rsync to edge server)"
+        log_info "  edge_server: $EDGE_SERVER_USER@$EDGE_SERVER_HOST:$EDGE_SERVER_PORT"
+    elif [ "$CLOUD_OFFLOAD" == "1" ]; then
+        log_info "  cloud_offload: cloud mode (skip local video encoding)"
+    else
+        log_info "  cloud_offload: disabled (local video encoding)"
     fi
+
+    # Export edge server environment variables for edge_upload.py
+    export EDGE_SERVER_HOST
+    export EDGE_SERVER_USER
+    export EDGE_SERVER_PORT
+    export EDGE_SERVER_PATH
 
     # Build command arguments
     local cmd_args=(
@@ -479,9 +500,13 @@ start_cli() {
         --record.single_task="$single_task"
     )
 
-    # Add cloud_offload if enabled
-    if [ "$CLOUD_OFFLOAD" == "1" ]; then
-        cmd_args+=(--record.cloud_offload=true)
+    # Add cloud_offload based on mode (0=local, 1=cloud, 2=edge)
+    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+        # Edge mode - pass integer 2
+        cmd_args+=(--record.cloud_offload=2)
+    elif [ "$CLOUD_OFFLOAD" == "1" ]; then
+        # Cloud mode - pass integer 1 (or true for backward compatibility)
+        cmd_args+=(--record.cloud_offload=1)
     fi
 
     # Start CLI in foreground (blocks until exit)
@@ -501,11 +526,19 @@ print_usage() {
     echo "  REPO_ID             Dataset repository ID (default: so101-test)"
     echo "  SINGLE_TASK         Task description (default: 'start and test so101 arm.')"
     echo "  USE_NPU             Ascend NPU support (default: 1, set to 0 to disable)"
-    echo "  CLOUD_OFFLOAD       Cloud mode (default: 1, set to 0 for local encoding)"
-    echo "                      When enabled, raw images are uploaded to cloud for training"
+    echo "  CLOUD_OFFLOAD       Offload mode (default: 0):"
+    echo "                        0 = Local encoding (encode videos on client)"
+    echo "                        1 = Cloud mode (upload raw images to cloud)"
+    echo "                        2 = Edge mode (rsync to edge server, fastest for LAN)"
     echo "  ASCEND_TOOLKIT_PATH Path to CANN toolkit (default: /usr/local/Ascend/ascend-toolkit)"
     echo "  DORA_INIT_DELAY     Seconds to wait for DORA to initialize (default: 5)"
     echo "  SOCKET_TIMEOUT      Seconds to wait for ZeroMQ sockets (default: 30)"
+    echo ""
+    echo "Edge Server Configuration (for CLOUD_OFFLOAD=2):"
+    echo "  EDGE_SERVER_HOST    Edge server IP address (default: 192.168.1.100)"
+    echo "  EDGE_SERVER_USER    SSH user on edge server (default: dorobot)"
+    echo "  EDGE_SERVER_PORT    SSH port (default: 22)"
+    echo "  EDGE_SERVER_PATH    Upload directory on edge server (default: /data/dorobot/uploads)"
     echo ""
     echo "Device Port Configuration (for stable operation):"
     echo "  CAMERA_TOP_PATH     Camera top path or index (default: 0)"
@@ -521,10 +554,19 @@ print_usage() {
     echo "    python scripts/detect_usb_ports.py --yaml"
     echo ""
     echo "Examples:"
-    echo "  $0                              # Default: cloud mode + NPU enabled"
+    echo "  $0                              # Default: local mode + NPU enabled"
     echo "  REPO_ID=my-dataset $0           # Custom dataset name"
     echo ""
-    echo "  # Disable cloud mode (use local video encoding):"
+    echo "  # Edge mode (fastest - rsync to edge server on same LAN):"
+    echo "  CLOUD_OFFLOAD=2 $0"
+    echo ""
+    echo "  # Edge mode with custom server:"
+    echo "  CLOUD_OFFLOAD=2 EDGE_SERVER_HOST=192.168.1.200 $0"
+    echo ""
+    echo "  # Cloud mode (upload raw images directly to cloud):"
+    echo "  CLOUD_OFFLOAD=1 $0"
+    echo ""
+    echo "  # Local mode (encode videos locally with NPU/CPU):"
     echo "  CLOUD_OFFLOAD=0 $0"
     echo ""
     echo "  # With persistent device paths (recommended for stability):"
@@ -532,9 +574,6 @@ print_usage() {
     echo ""
     echo "  # Disable NPU (for non-Ascend hardware):"
     echo "  USE_NPU=0 $0"
-    echo ""
-    echo "  # Local mode without NPU:"
-    echo "  USE_NPU=0 CLOUD_OFFLOAD=0 $0"
     echo ""
     echo "  # With longer init delay (if timeout issues):"
     echo "  DORA_INIT_DELAY=10 $0"
@@ -603,15 +642,19 @@ main() {
     echo "  Controls:"
     echo "    'n'     - Save episode and start new one"
     echo "    'p'     - Proceed after robot reset"
-    if [ "$CLOUD_OFFLOAD" == "1" ]; then
+    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+        echo "    'e'     - Stop, rsync to edge server"
+    elif [ "$CLOUD_OFFLOAD" == "1" ]; then
         echo "    'e'     - Stop, upload to cloud, and train"
     else
         echo "    'e'     - Stop recording and exit"
     fi
     echo "    Ctrl+C  - Emergency stop and exit"
     echo ""
-    if [ "$CLOUD_OFFLOAD" == "1" ]; then
-        echo "  Mode: Cloud Offload (default)"
+    if [ "$CLOUD_OFFLOAD" == "2" ]; then
+        echo "  Mode: Edge Upload (rsync to $EDGE_SERVER_HOST)"
+    elif [ "$CLOUD_OFFLOAD" == "1" ]; then
+        echo "  Mode: Cloud Offload"
     else
         echo "  Mode: Local Encoding"
     fi

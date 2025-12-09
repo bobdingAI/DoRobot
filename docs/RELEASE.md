@@ -4,6 +4,86 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.70 (2025-12-08) - Edge Upload Mode (CLOUD_OFFLOAD=2)
+
+### Summary
+Added new edge upload mode that sends raw images to a local API server (edge server) via rsync for encoding, instead of encoding locally or uploading directly to cloud.
+
+### Problem
+Both local encoding (CLOUD_OFFLOAD=0) and direct cloud upload (CLOUD_OFFLOAD=1) have significant wait times:
+- Local NPU encoding: ~2-5 minutes per episode
+- Direct cloud upload (WAN): ~5 minutes per episode (720MB raw images at ~20 Mbps)
+
+### Solution
+Edge upload mode (CLOUD_OFFLOAD=2) uses rsync to transfer raw images to a local edge server on the same LAN:
+- LAN transfer: ~6 seconds per episode (720MB at ~1 Gbps)
+- Client continues recording immediately
+- Edge server handles encoding + cloud upload in background
+
+Time savings: ~5 minutes → ~6 seconds per episode (50x faster client wait time)
+
+### New Files
+
+**operating_platform/core/edge_upload.py**
+- `EdgeConfig`: Configuration dataclass for edge server connection
+- `EdgeUploader`: Main class for rsync upload and edge server communication
+- `EdgeUploadThread`: Background thread for non-blocking uploads
+- `run_edge_upload()`: Convenience function for edge upload workflow
+
+**docs/edge_upload.md**
+- Design document for edge upload feature
+- Architecture diagram and time comparison
+- Configuration and error handling documentation
+
+### Changes
+
+**operating_platform/core/main.py**
+- Added offload mode constants: `OFFLOAD_LOCAL=0`, `OFFLOAD_CLOUD=1`, `OFFLOAD_EDGE=2`
+- Added `test_edge_connection()` function for connection testing at startup
+- Updated exit flow to handle edge upload mode separately from cloud mode
+- Backward compatible with boolean `cloud_offload` values
+
+**scripts/run_so101.sh**
+- Added `CLOUD_OFFLOAD=2` support (edge mode)
+- Added edge server environment variables:
+  - `EDGE_SERVER_HOST` (default: 192.168.1.100)
+  - `EDGE_SERVER_USER` (default: dorobot)
+  - `EDGE_SERVER_PORT` (default: 22)
+  - `EDGE_SERVER_PATH` (default: /data/dorobot/uploads)
+- Updated help text and examples
+
+### Usage
+
+```bash
+# Edge mode (fastest - rsync to edge server on same LAN)
+CLOUD_OFFLOAD=2 bash scripts/run_so101.sh
+
+# Edge mode with custom server
+CLOUD_OFFLOAD=2 EDGE_SERVER_HOST=192.168.1.200 bash scripts/run_so101.sh
+
+# Cloud mode (direct upload to cloud)
+CLOUD_OFFLOAD=1 bash scripts/run_so101.sh
+
+# Local mode (encode locally with NPU/CPU)
+CLOUD_OFFLOAD=0 bash scripts/run_so101.sh
+```
+
+### CLOUD_OFFLOAD Mode Summary
+
+| Value | Mode | Description |
+|-------|------|-------------|
+| 0 | Local | Encode locally (NPU/CPU), upload videos to cloud |
+| 1 | Cloud | Skip encoding, upload raw images directly to cloud |
+| 2 | Edge | Skip encoding, rsync to edge server for encoding |
+
+### Edge Server Requirements
+- SSH access from client
+- rsync installed
+- Write access to upload directory
+- data-platform API with edge upload endpoints (`/edge/upload-complete`, `/edge/status/{repo_id}`, `/edge/train`)
+
+---
+
 ## v0.2.62 (2025-12-07) - Fix Exit During Reset Phase
 
 ### Summary
