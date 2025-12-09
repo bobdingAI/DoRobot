@@ -73,7 +73,7 @@ class EdgeConfig:
             password=os.environ.get("EDGE_SERVER_PASSWORD", DEFAULT_EDGE_PASSWORD),
             port=int(os.environ.get("EDGE_SERVER_PORT", str(DEFAULT_EDGE_PORT))),
             remote_path=os.environ.get("EDGE_SERVER_PATH", DEFAULT_EDGE_PATH),
-            api_url=os.environ.get("EDGE_API_URL", DEFAULT_EDGE_API_URL),
+            api_url=os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", DEFAULT_EDGE_API_URL)),
             ssh_key=os.environ.get("EDGE_SERVER_KEY"),
         )
 
