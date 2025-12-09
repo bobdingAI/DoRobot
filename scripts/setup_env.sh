@@ -308,6 +308,10 @@ main() {
         install_npu_packages
     fi
 
+    # Step 2.8: Pin setuptools version (avoid compatibility issues)
+    log_step "Installing setuptools==68.2.2..."
+    pip install setuptools==68.2.2
+
     # Step 3: Install DORA-RS
     log_step "Installing DORA-RS..."
     pip install dora-rs-cli

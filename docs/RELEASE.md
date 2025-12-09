@@ -4,6 +4,16 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.83 (2025-12-09) - Pin setuptools version
+
+### Summary
+Added `pip install setuptools==68.2.2` to setup_env.sh to avoid compatibility issues with newer setuptools versions.
+
+### Changes
+- Added Step 2.8 to pin setuptools==68.2.2 before installing packages
+
+---
+
 ## v0.2.82 (2025-12-09) - Add python-socketio to setup script
 
 ### Summary
