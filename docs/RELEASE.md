@@ -4,6 +4,64 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.91 (2025-12-09) - Multi-user Upload Path Isolation
+
+### Summary
+Changed edge upload path structure to include API_USERNAME for multi-user isolation on shared API servers.
+
+### Problem
+When multiple users share the same edge/API server, upload paths could conflict:
+- Old: `/uploaded_data/{REPO_ID}/`
+- Users uploading datasets with same repo_id would overwrite each other
+
+### Solution
+Include API_USERNAME in the upload path:
+- New: `/uploaded_data/{API_USERNAME}/{REPO_ID}/`
+- Each user's data is isolated in their own subdirectory
+
+### Changes
+
+**operating_platform/core/edge_upload.py**
+- Added `api_username` field to `EdgeConfig` (from `API_USERNAME` env var, default: "default")
+- Added `get_upload_path(repo_id)` method that returns `{remote_path}/{api_username}/{repo_id}`
+- Updated `sync_dataset()` to use new path structure
+- Updated `notify_upload_complete()` to send full path with username
+- Updated log messages to show API user and full path
+
+**scripts/edge_encode.py**
+- Updated docstring to document API_USERNAME
+- Updated log output to show API user and full upload path
+- Updated test_connection() to show path structure
+
+**scripts/run_so101.sh**
+- Export API_USERNAME to environment
+- Version bumped to 0.2.91
+
+### Configuration
+
+Add to `~/.dorobot_device.conf`:
+```bash
+API_USERNAME="your_username"
+```
+
+Or set via environment:
+```bash
+API_USERNAME=alice bash scripts/run_so101.sh
+```
+
+### Remote Structure
+
+```
+/uploaded_data/
+  ├── alice/
+  │   ├── test_dataset_1/
+  │   └── test_dataset_2/
+  └── bob/
+      └── test_dataset_1/  # Same repo_id, different user
+```
+
+---
+
 ## v0.2.90 (2025-12-09) - Add CLOUD=4 Local Raw Mode
 
 ### Summary

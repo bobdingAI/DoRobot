@@ -46,6 +46,8 @@ DEFAULT_EDGE_PORT = int(os.environ.get("EDGE_SERVER_PORT", "22"))
 DEFAULT_EDGE_PATH = os.environ.get("EDGE_SERVER_PATH", "/uploaded_data")
 # API URL defaults to same host as edge server
 DEFAULT_EDGE_API_URL = os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", "http://127.0.0.1:8000"))
+# API username for multi-user upload path isolation
+DEFAULT_API_USERNAME = os.environ.get("API_USERNAME", "default")
 
 
 def log(message: str):
@@ -62,6 +64,7 @@ class EdgeConfig:
     port: int = DEFAULT_EDGE_PORT
     remote_path: str = DEFAULT_EDGE_PATH
     api_url: str = DEFAULT_EDGE_API_URL
+    api_username: str = DEFAULT_API_USERNAME  # API username for path isolation
     ssh_key: Optional[str] = None  # Path to SSH private key (alternative to password)
 
     @classmethod
@@ -74,8 +77,13 @@ class EdgeConfig:
             port=int(os.environ.get("EDGE_SERVER_PORT", str(DEFAULT_EDGE_PORT))),
             remote_path=os.environ.get("EDGE_SERVER_PATH", DEFAULT_EDGE_PATH),
             api_url=os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", DEFAULT_EDGE_API_URL)),
+            api_username=os.environ.get("API_USERNAME", DEFAULT_API_USERNAME),
             ssh_key=os.environ.get("EDGE_SERVER_KEY"),
         )
+
+    def get_upload_path(self, repo_id: str) -> str:
+        """Get full upload path including username for isolation: {remote_path}/{api_username}/{repo_id}"""
+        return f"{self.remote_path}/{self.api_username}/{repo_id}"
 
 
 class EdgeUploader:
@@ -409,17 +417,26 @@ class EdgeUploader:
 
         Returns:
             True if sync successful
+
+        Note:
+            Upload path is: {remote_path}/{api_username}/{repo_id}/
+            This isolates uploads by user to avoid conflicts on shared API servers.
         """
+        # Get full upload path with username isolation
+        upload_path = self.config.get_upload_path(repo_id)
+        upload_subpath = f"{self.config.api_username}/{repo_id}"
+
         log(f"Syncing dataset to edge server...")
         log(f"  Local: {local_path}")
-        log(f"  Remote: {self.config.user}@{self.config.host}:{self.config.remote_path}/{repo_id}/")
+        log(f"  Remote: {self.config.user}@{self.config.host}:{upload_path}/")
+        log(f"  User: {self.config.api_username}")
 
-        # Create remote directory
-        if not self.create_remote_directory(repo_id):
+        # Create remote directory (includes username subdirectory)
+        if not self.create_remote_directory(upload_subpath):
             return False
 
         start_time = time.time()
-        remote_path = f"{self.config.remote_path}/{repo_id}"
+        remote_path = upload_path
 
         # Use SFTP if password authentication (paramiko)
         if self._use_paramiko():
@@ -438,7 +455,7 @@ class EdgeUploader:
                 return False
 
         # Fall back to rsync for key-based auth
-        rsync_cmd = self._build_rsync_cmd(local_path, repo_id)
+        rsync_cmd = self._build_rsync_cmd(local_path, upload_subpath)
 
         log(f"Running: {' '.join(rsync_cmd[:5])}...")  # Don't log full command (may have secrets)
 
@@ -483,15 +500,21 @@ class EdgeUploader:
         """
         Notify edge server that upload is complete.
         This triggers encoding and cloud upload.
+
+        Note:
+            Dataset path sent to API is: {remote_path}/{api_username}/{repo_id}
         """
+        upload_path = self.config.get_upload_path(repo_id)
         log(f"Notifying edge server: upload complete for {repo_id}")
+        log(f"  Dataset path: {upload_path}")
 
         try:
             response = requests.post(
                 f"{self.config.api_url}/edge/upload-complete",
                 json={
                     "repo_id": repo_id,
-                    "dataset_path": f"{self.config.remote_path}/{repo_id}",
+                    "dataset_path": upload_path,
+                    "username": self.config.api_username,
                 },
                 timeout=30,
             )
