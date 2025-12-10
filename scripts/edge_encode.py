@@ -10,38 +10,37 @@ This script handles the complete edge workflow:
 5. Download trained model to local path
 
 The script will NOT exit until training completes and model is downloaded.
-Multiple instances can run in parallel for different datasets.
+Multiple instances can run in parallel for different datasets (isolated by username).
 
-Usage:
-    # Full workflow: upload -> encode -> train -> download model
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
+Designed for shared edge servers - use edge.sh wrapper for easier invocation:
+
+    scripts/edge.sh -u <username> -p <password> -d <dataset_path> [options]
+
+Direct usage:
+    # Full workflow (via environment variables)
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (no training)
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
 
-    # Custom model output path (default: {dataset}/model/)
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --model-output /path/to/model
-
-    # Custom training timeout (default: 120 minutes)
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --timeout 180
-
-    # Test connection first
-    python scripts/edge_encode.py --test-connection
-
-    # Custom repo ID (if different from folder name)
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --repo-id custom_name
+    # Test connection
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --test-connection
 
 Output:
     Default model path: {dataset_path}/model/
 
-Environment variables (from ~/.dorobot_device.conf):
-    EDGE_SERVER_HOST     Edge server IP
+Environment variables:
+    API_USERNAME         API username for authentication and path isolation (REQUIRED)
+    API_PASSWORD         API password for authentication (REQUIRED for training)
+    API_BASE_URL         API server URL (default: http://127.0.0.1:8000)
+    EDGE_SERVER_HOST     Edge server IP (default: 127.0.0.1)
     EDGE_SERVER_USER     SSH username
     EDGE_SERVER_PASSWORD SSH password
     EDGE_SERVER_PORT     SSH port (default: 22)
     EDGE_SERVER_PATH     Remote upload path (default: /uploaded_data)
-    API_BASE_URL         API server URL
-    API_USERNAME         API username for path isolation (default: default)
 
 Upload path structure: {EDGE_SERVER_PATH}/{API_USERNAME}/{REPO_ID}/
     This isolates uploads by user to avoid conflicts on shared API servers.
@@ -578,32 +577,29 @@ def main():
         description="Edge upload for raw image datasets - upload, encode, train, and download model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Recommended: Use edge.sh wrapper for easier invocation:
+    scripts/edge.sh -u <username> -p <password> -d <dataset_path> [options]
+
+Direct usage (set API_USERNAME and API_PASSWORD environment variables):
     # Full workflow: upload -> encode -> train -> download model
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (skip training)
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
 
-    # Custom model output path
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --model-output /path/to/model
-
-    # Custom timeout for training
-    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --timeout 180
-
-    # Test connection first
-    python scripts/edge_encode.py --test-connection
-
-    # Custom repo ID
-    python scripts/edge_encode.py --dataset /path/to/data --repo-id my_custom_name
+    # Test connection
+    API_USERNAME=alice API_PASSWORD=alice123 \\
+        python scripts/edge_encode.py --test-connection
 
 Output:
     By default, trained model is downloaded to: {dataset_path}/model/
 
 Notes:
-    - This script will NOT exit until training completes and model is downloaded
-    - Multiple instances can run in parallel for different datasets
-    - Use --skip-training if you only want to upload and encode
+    - API_USERNAME and API_PASSWORD are required for multi-user isolation
+    - Script will NOT exit until training completes and model is downloaded
+    - Multiple users can run in parallel (isolated by username)
         """,
     )
     parser.add_argument(

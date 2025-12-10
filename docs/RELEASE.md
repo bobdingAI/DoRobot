@@ -4,6 +4,73 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.94 (2025-12-09) - Multi-User edge.sh with Mandatory Credentials
+
+### Summary
+Updated edge.sh to require mandatory `-u username` and `-p password` parameters for multi-user edge server usage. This ensures user isolation when multiple users run edge.sh on a shared edge server.
+
+### Breaking Change
+The old positional argument syntax is no longer supported:
+```bash
+# OLD (no longer works)
+scripts/edge.sh ~/DoRobot/dataset/my_data
+
+# NEW (required)
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my_data
+```
+
+### New Usage
+
+```bash
+scripts/edge.sh -u <username> -p <password> -d <dataset_path> [options]
+
+Required:
+  -u, --username      API username (for authentication and path isolation)
+  -p, --password      API password
+  -d, --dataset       Path to dataset directory with raw images
+
+Optional:
+  --skip-training     Skip training (just upload + encode)
+  --repo-id NAME      Custom repo ID (default: folder name)
+  --model-output PATH Custom model output path (default: dataset/model/)
+  --timeout MINUTES   Training timeout in minutes (default: 120)
+  --test-connection   Only test SSH and API connections
+```
+
+### Examples
+
+```bash
+# Full workflow for user "alice"
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my_data
+
+# Skip training
+scripts/edge.sh -u bob -p bob456 -d ~/dataset/test --skip-training
+
+# Test connection
+scripts/edge.sh -u alice -p alice123 --test-connection
+
+# Custom timeout
+scripts/edge.sh -u alice -p alice123 -d ~/data --timeout 180
+```
+
+### Multi-User Isolation
+- Each user's uploads go to `/uploaded_data/{username}/{repo_id}/`
+- Multiple users can run edge.sh simultaneously on the same server
+- No conflicts between users with same repo_id names
+
+### Changes
+
+**scripts/edge.sh**
+- Changed from positional argument to required `-u`, `-p`, `-d` options
+- Proper argument parsing with error messages
+- Shows upload path with username in output
+
+**scripts/edge_encode.py**
+- Updated docstring with new usage
+- References edge.sh wrapper as recommended usage
+
+---
+
 ## v0.2.93 (2025-12-09) - Edge Full Workflow: Wait for Training and Download Model
 
 ### Summary
