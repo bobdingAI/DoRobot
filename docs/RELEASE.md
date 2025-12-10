@@ -4,6 +4,33 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.103 (2025-12-10) - Fix Model Download from Cloud Server
+
+### Summary
+Fixed model download in edge workflow. Previously, DoRobot tried to download
+models via SFTP from edge server, but models are stored on cloud server.
+Now downloads directly from cloud server via HTTP.
+
+### Changes
+
+**edge_upload.py:**
+- Added `download_model_from_cloud()` method for HTTP download from cloud server
+- `poll_training_status()` now returns dict with `transaction_id`, `cloud_api_url`, `model_path`
+- `run_edge_upload()` now uses cloud download instead of SFTP download
+- Downloads model via `/transactions/{id}/model` endpoint on cloud server
+- Handles both zip archives and single files
+
+### Model Download Flow (Fixed)
+1. Training completes on cloud server
+2. Edge server returns `cloud_api_url` and `transaction_id` in status
+3. DoRobot downloads directly from cloud: `{cloud_api_url}/transactions/{tx_id}/model`
+4. Model extracted to local `~/DoRobot/model/` directory
+
+### Requires
+- data-platform v2.0.40+ (for `cloud_api_url` in edge status)
+
+---
+
 ## v0.2.102 (2025-12-10) - Add Transaction ID to Edge Upload Logs
 
 ### Summary
