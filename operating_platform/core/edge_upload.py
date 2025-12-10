@@ -799,129 +799,104 @@ class EdgeUploader:
 
     def download_model_from_cloud(
         self,
-        cloud_api_url: str,
-        transaction_id: str,
+        ssh_host: str,
+        ssh_username: str,
+        ssh_password: str,
+        ssh_port: int,
+        remote_model_path: str,
         local_output_path: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> bool:
         """
-        Download trained model directly from cloud server via HTTP.
+        Download trained model directly from cloud server via SFTP.
 
         This bypasses the edge server and downloads directly from cloud,
         since the model files are stored on the cloud server, not edge.
+        Borrowed from cloud_train.py's working download_model() method.
 
         Args:
-            cloud_api_url: Cloud training server URL (e.g., http://cloud:8000)
-            transaction_id: Transaction ID for the completed training
+            ssh_host: Cloud server SSH host
+            ssh_username: Cloud server SSH username
+            ssh_password: Cloud server SSH password (plaintext, decoded from base64)
+            ssh_port: Cloud server SSH port
+            remote_model_path: Path to model on cloud server
             local_output_path: Local path to save model
             progress_callback: Optional callback for progress updates
 
         Returns:
             True if download successful
         """
-        import zipfile
-        import io
-
-        log(f"Downloading model from cloud server...")
-        log(f"  Cloud URL: {cloud_api_url}")
-        log(f"  Transaction: {transaction_id}")
+        log(f"Downloading model from cloud server via SFTP...")
+        log(f"  SSH Host: {ssh_host}:{ssh_port}")
+        log(f"  SSH User: {ssh_username}")
+        log(f"  Remote path: {remote_model_path}")
         log(f"  Local path: {local_output_path}")
+
+        if not PARAMIKO_AVAILABLE:
+            log("ERROR: paramiko not available - install with: pip install paramiko")
+            return False
 
         try:
             # Create local directory
             Path(local_output_path).mkdir(parents=True, exist_ok=True)
 
-            # Login to cloud server to get token
-            log("Authenticating with cloud server...")
-            login_response = requests.post(
-                f"{cloud_api_url}/login",
-                json={
-                    "username": self.config.api_username,
-                    "password": self.config.api_password
-                },
+            # Connect to cloud server via SSH
+            log("Connecting to cloud server...")
+            if progress_callback:
+                progress_callback("Connecting to cloud server...")
+
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(
+                hostname=ssh_host,
+                port=ssh_port,
+                username=ssh_username,
+                password=ssh_password,
                 timeout=30,
+                allow_agent=False,
+                look_for_keys=False,
             )
+            log("SSH connection established")
 
-            if login_response.status_code != 200:
-                log(f"Cloud login failed: {login_response.status_code}")
-                return False
+            # Open SFTP session
+            sftp = ssh_client.open_sftp()
+            downloaded_files = 0
 
-            token = login_response.json().get("access_token")
-            if not token:
-                log("No access token in login response")
-                return False
+            def download_recursive(remote_dir: str, local_dir: str):
+                nonlocal downloaded_files
+                Path(local_dir).mkdir(parents=True, exist_ok=True)
 
-            # Download model from cloud server
-            log("Downloading model file...")
+                try:
+                    for entry in sftp.listdir_attr(remote_dir):
+                        remote_path = f"{remote_dir}/{entry.filename}"
+                        local_path = Path(local_dir) / entry.filename
+
+                        if entry.st_mode & 0o40000:  # Is directory
+                            download_recursive(remote_path, str(local_path))
+                        else:
+                            sftp.get(remote_path, str(local_path))
+                            downloaded_files += 1
+                            if downloaded_files % 10 == 0:
+                                progress = f"{downloaded_files} files downloaded"
+                                log(f"  {progress}")
+                                if progress_callback:
+                                    progress_callback(progress)
+                except Exception as e:
+                    log(f"Error downloading from {remote_dir}: {e}")
+                    raise
+
+            download_recursive(remote_model_path, local_output_path)
+            sftp.close()
+            ssh_client.close()
+
+            log(f"Model download completed: {downloaded_files} files")
             if progress_callback:
-                progress_callback("Downloading from cloud...")
+                progress_callback(f"{downloaded_files} files (complete)")
 
-            download_response = requests.get(
-                f"{cloud_api_url}/transactions/{transaction_id}/model",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=300,  # 5 minutes for large models
-                stream=True,
-            )
+            return downloaded_files > 0
 
-            if download_response.status_code != 200:
-                log(f"Model download failed: {download_response.status_code} - {download_response.text}")
-                return False
-
-            # Check content type to determine if it's a zip file
-            content_type = download_response.headers.get("Content-Type", "")
-            content_disposition = download_response.headers.get("Content-Disposition", "")
-
-            # Get total size for progress
-            total_size = int(download_response.headers.get("Content-Length", 0))
-            downloaded_size = 0
-
-            # Download to memory first (model files are typically small, < 100MB)
-            content = io.BytesIO()
-            for chunk in download_response.iter_content(chunk_size=8192):
-                if chunk:
-                    content.write(chunk)
-                    downloaded_size += len(chunk)
-                    if progress_callback and total_size > 0:
-                        pct = int(100 * downloaded_size / total_size)
-                        progress_callback(f"Downloaded {downloaded_size // 1024}KB ({pct}%)")
-
-            content.seek(0)
-
-            # Check if it's a zip file
-            if "zip" in content_type or content_disposition.endswith(".zip"):
-                log("Extracting zip file...")
-                if progress_callback:
-                    progress_callback("Extracting model files...")
-
-                with zipfile.ZipFile(content, 'r') as zf:
-                    zf.extractall(local_output_path)
-                    file_count = len(zf.namelist())
-                    log(f"Extracted {file_count} files")
-            else:
-                # Single file - determine filename from Content-Disposition or use default
-                filename = "model.safetensors"
-                if "filename=" in content_disposition:
-                    import re
-                    match = re.search(r'filename="?([^";\s]+)"?', content_disposition)
-                    if match:
-                        filename = match.group(1)
-
-                output_file = Path(local_output_path) / filename
-                with open(output_file, 'wb') as f:
-                    f.write(content.read())
-                log(f"Saved model file: {output_file}")
-
-            log(f"Model download completed to: {local_output_path}")
-            if progress_callback:
-                progress_callback("Download complete")
-
-            return True
-
-        except requests.exceptions.Timeout:
-            log("Model download timed out")
-            return False
         except Exception as e:
-            log(f"Cloud download error: {e}")
+            log(f"Cloud SFTP download error: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -939,8 +914,11 @@ class EdgeUploader:
         Returns:
             (success, status_info) tuple where status_info contains:
             - transaction_id: Cloud transaction ID
-            - cloud_api_url: Cloud server URL for direct download
-            - model_path: Model path on cloud server (for reference)
+            - model_path: Model path on cloud server
+            - ssh_host: Cloud server SSH host for SFTP download
+            - ssh_username: Cloud server SSH username
+            - ssh_password: Cloud server SSH password (base64 encoded)
+            - ssh_port: Cloud server SSH port
         """
         log(f"Monitoring training (timeout: {timeout_minutes} min)...")
 
@@ -965,14 +943,26 @@ class EdgeUploader:
 
             if current_status == "COMPLETED":
                 model_path = status.get("model_path")
-                cloud_api_url = status.get("cloud_api_url")
                 log(f"Training completed!{tx_suffix} Model path: {model_path}")
-                log(f"  Cloud API URL: {cloud_api_url}")
-                # Return full status info for cloud download
+
+                # Extract SSH credentials for SFTP download
+                ssh_host = status.get("ssh_host")
+                ssh_username = status.get("ssh_username")
+                ssh_password = status.get("ssh_password")  # base64 encoded
+                ssh_port = status.get("ssh_port")
+
+                log(f"  SSH Host: {ssh_host}:{ssh_port}")
+                log(f"  SSH User: {ssh_username}")
+                log(f"  SSH Password: {'SET' if ssh_password else 'NOT SET'}")
+
+                # Return full status info for SFTP download
                 return True, {
                     "transaction_id": tx_id,
-                    "cloud_api_url": cloud_api_url,
                     "model_path": model_path,
+                    "ssh_host": ssh_host,
+                    "ssh_username": ssh_username,
+                    "ssh_password": ssh_password,
+                    "ssh_port": ssh_port,
                 }
             elif current_status in ("FAILED", "ERROR", "UPLOAD_FAILED", "ENCODING_FAILED", "TRAINING_FAILED"):
                 error = status.get("error", progress or "Unknown error")
@@ -1152,18 +1142,35 @@ def run_edge_upload(
                 if status_callback:
                     status_callback("DOWNLOADING_MODEL", "Starting download...")
 
-                # Extract cloud download info from status
-                cloud_api_url = status_info.get("cloud_api_url")
-                transaction_id = status_info.get("transaction_id")
+                # Extract SSH credentials for SFTP download from cloud server
+                ssh_host = status_info.get("ssh_host")
+                ssh_username = status_info.get("ssh_username")
+                ssh_password_b64 = status_info.get("ssh_password")  # base64 encoded
+                ssh_port = status_info.get("ssh_port")
+                model_path = status_info.get("model_path")
 
-                if not cloud_api_url or not transaction_id:
-                    log(f"Missing cloud download info: cloud_api_url={cloud_api_url}, transaction_id={transaction_id}")
+                if not all([ssh_host, ssh_username, ssh_password_b64, model_path]):
+                    log(f"Missing SSH/model info for download:")
+                    log(f"  ssh_host={ssh_host}, ssh_username={ssh_username}")
+                    log(f"  ssh_password={'SET' if ssh_password_b64 else 'NOT SET'}")
+                    log(f"  ssh_port={ssh_port}, model_path={model_path}")
                     return False
 
-                # Download directly from cloud server (bypassing edge)
+                # Decode base64-encoded password
+                import base64
+                try:
+                    ssh_password = base64.b64decode(ssh_password_b64).decode('utf-8')
+                except Exception as e:
+                    log(f"Failed to decode SSH password: {e}")
+                    return False
+
+                # Download directly from cloud server via SFTP (bypassing edge)
                 download_success = uploader.download_model_from_cloud(
-                    cloud_api_url=cloud_api_url,
-                    transaction_id=transaction_id,
+                    ssh_host=ssh_host,
+                    ssh_username=ssh_username,
+                    ssh_password=ssh_password,
+                    ssh_port=int(ssh_port) if ssh_port else 22,
+                    remote_model_path=model_path,
                     local_output_path=model_output_path,
                     progress_callback=lambda p: status_callback("DOWNLOADING_MODEL", p) if status_callback else None
                 )

@@ -4,6 +4,34 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.104 (2025-12-10) - Use SFTP for Model Download (like cloud_train.py)
+
+### Summary
+Changed model download from HTTP to SFTP, borrowing the working pattern from
+`cloud_train.py`. HTTP download was not suitable for model folders with many files.
+SFTP download is the same method used by the working CLOUD_OFFLOAD=1 mode.
+
+### Changes
+
+**edge_upload.py:**
+- `download_model_from_cloud()` now uses SFTP via paramiko (was HTTP)
+- SSH credentials (host, username, password, port) passed from edge status
+- `poll_training_status()` returns SSH info from edge status response
+- `run_edge_upload()` decodes base64 password and calls SFTP download
+- Recursive directory download (identical to cloud_train.py pattern)
+
+### Model Download Flow (SFTP)
+1. Training completes on cloud server
+2. Edge server stores SSH credentials in status (from cloud transaction)
+3. DoRobot gets SSH info when polling status (ssh_host, ssh_username, etc.)
+4. Downloads model directly from cloud via SFTP (bypassing edge server)
+5. Model saved to local directory
+
+### Requires
+- data-platform v2.0.41+ (for ssh_info in edge status)
+
+---
+
 ## v0.2.103 (2025-12-10) - Fix Model Download from Cloud Server
 
 ### Summary
