@@ -4,6 +4,30 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.97 (2025-12-09) - README: CLOUD=2 Edge Workflow Documentation
+
+### Summary
+Added comprehensive documentation for the CLOUD=2 edge workflow in README.md.
+
+### New Section: Quick Start: Edge Workflow (CLOUD=2) - Recommended
+
+The new section includes:
+- Architecture diagram showing data flow: Robot → Edge Server → Cloud → Model
+- Performance comparison table (CLOUD=2 is 50x faster than direct upload)
+- Step-by-step setup guide for edge server
+- Robot device configuration instructions
+- Complete workflow with automatic training and model download
+- Edge server environment variables reference
+- Multi-user support documentation
+
+### Key Points Documented
+- CLOUD=2 is the default and recommended mode
+- LAN transfer takes ~6 seconds vs ~5 minutes for WAN upload
+- Robot doesn't wait for encoding/training
+- Model is automatically downloaded after training
+
+---
+
 ## v0.2.96 (2025-12-09) - Fix Quick Start Guide Clarity
 
 ### Summary
