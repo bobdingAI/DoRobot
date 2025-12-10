@@ -4,6 +4,94 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.93 (2025-12-09) - Edge Full Workflow: Wait for Training and Download Model
+
+### Summary
+Enhanced edge.sh to wait for training completion and automatically download the trained model. The script now handles the complete workflow: upload -> encode -> train -> download model.
+
+### Features
+
+**Full Workflow Support**
+- Script waits for training to complete (with configurable timeout)
+- Automatically downloads trained model to local path
+- Shows transaction ID from data-platform for tracking
+- Default model output: `{dataset_path}/model/`
+- Multiple instances can run in parallel for different datasets
+
+**New Command Options**
+```bash
+scripts/edge.sh <dataset_path> [options]
+
+Options:
+  --skip-training     Skip training (just upload + encode)
+  --model-output PATH Custom model output path (default: dataset/model/)
+  --timeout MINUTES   Training timeout in minutes (default: 120)
+  --repo-id NAME      Custom repo ID (default: folder name)
+  --test-connection   Only test SSH and API connections
+```
+
+### Usage Examples
+
+```bash
+# Full workflow: upload -> encode -> train -> download model
+scripts/edge.sh ~/DoRobot/dataset/my_repo_id
+
+# Custom model output path
+scripts/edge.sh ~/dataset/my_data --model-output /custom/path/model
+
+# Custom timeout (default 120 minutes)
+scripts/edge.sh ~/dataset/my_data --timeout 180
+
+# Upload only (skip training and download)
+scripts/edge.sh ~/dataset/my_data --skip-training
+```
+
+### Workflow Steps
+
+1. **[Step 1/4] Upload** - Upload raw images to edge server via SFTP
+2. **[Step 2/4] Encode** - Trigger encoding on edge server
+3. **[Step 3/4] Train** - Trigger cloud training (returns transaction ID)
+4. **[Step 4/4] Wait & Download** - Poll status until complete, download model
+
+### Changes
+
+**operating_platform/core/edge_upload.py**
+- Added `download_model()` method to EdgeUploader for SFTP model download
+- Updated `trigger_training()` to return `(success, transaction_id)` tuple
+- Recursive directory download with progress callback
+
+**scripts/edge_encode.py**
+- Added `wait_training_and_download()` function
+- Added `--model-output` and `--timeout` command-line options
+- Updated `run_retry_workflow()` to 4-step workflow with model download
+- Updated docstring with full workflow documentation
+
+**scripts/edge.sh**
+- Updated documentation with new options
+- Shows default model output path at startup
+- Note about waiting for training completion
+
+### Notes
+- Script will NOT exit until training completes and model is downloaded
+- Use `--skip-training` if you only want upload+encode functionality
+- Multiple parallel sessions supported for different datasets
+
+---
+
+## v0.2.92 (2025-12-09) - Add edge.sh Wrapper Script
+
+### Summary
+Added edge.sh wrapper script for simpler edge upload invocation.
+
+### Usage
+```bash
+scripts/edge.sh ~/DoRobot/dataset/my_repo_id
+scripts/edge.sh ~/dataset/my_data --skip-training
+scripts/edge.sh --test-connection
+```
+
+---
+
 ## v0.2.91 (2025-12-09) - Multi-user Upload Path Isolation
 
 ### Summary

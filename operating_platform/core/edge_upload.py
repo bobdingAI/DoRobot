@@ -550,27 +550,99 @@ class EdgeUploader:
         except Exception as e:
             return {"status": "ERROR", "error": str(e)}
 
-    def trigger_training(self, repo_id: str) -> bool:
-        """Trigger cloud training via edge server"""
+    def trigger_training(self, repo_id: str) -> tuple[bool, Optional[str]]:
+        """
+        Trigger cloud training via edge server.
+
+        Returns:
+            (success, transaction_id) tuple
+        """
         log(f"Triggering cloud training for {repo_id}")
 
         try:
             response = requests.post(
                 f"{self.config.api_url}/edge/train",
-                json={"repo_id": repo_id},
+                json={"repo_id": repo_id, "username": self.config.api_username},
                 timeout=30,
             )
 
             if response.status_code == 200:
                 data = response.json()
+                transaction_id = data.get("transaction_id")
                 log(f"Training triggered: {data.get('message', 'OK')}")
-                return True
+                if transaction_id:
+                    log(f"Transaction ID: {transaction_id}")
+                return True, transaction_id
             else:
                 log(f"Failed to trigger training: {response.status_code}")
-                return False
+                return False, None
 
         except Exception as e:
             log(f"Error triggering training: {e}")
+            return False, None
+
+    def download_model(
+        self,
+        remote_model_path: str,
+        local_output_path: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> bool:
+        """
+        Download trained model from edge server via SFTP.
+
+        Args:
+            remote_model_path: Path to model on edge server
+            local_output_path: Local path to save model
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            True if download successful
+        """
+        log(f"Downloading model from edge server...")
+        log(f"  Remote: {self.config.user}@{self.config.host}:{remote_model_path}")
+        log(f"  Local:  {local_output_path}")
+
+        try:
+            # Create local directory
+            Path(local_output_path).mkdir(parents=True, exist_ok=True)
+
+            sftp = self._get_sftp()
+            downloaded_files = 0
+
+            def download_recursive(remote_dir: str, local_dir: str):
+                nonlocal downloaded_files
+                Path(local_dir).mkdir(parents=True, exist_ok=True)
+
+                try:
+                    for entry in sftp.listdir_attr(remote_dir):
+                        remote_path = f"{remote_dir}/{entry.filename}"
+                        local_path = Path(local_dir) / entry.filename
+
+                        if entry.st_mode & 0o40000:  # Is directory
+                            download_recursive(remote_path, str(local_path))
+                        else:
+                            sftp.get(remote_path, str(local_path))
+                            downloaded_files += 1
+                            if downloaded_files % 10 == 0:
+                                progress = f"{downloaded_files} files downloaded"
+                                log(f"  {progress}")
+                                if progress_callback:
+                                    progress_callback(progress)
+                except Exception as e:
+                    log(f"Error downloading from {remote_dir}: {e}")
+                    raise
+
+            download_recursive(remote_model_path, local_output_path)
+
+            log(f"Model download completed: {downloaded_files} files")
+            if progress_callback:
+                progress_callback(f"{downloaded_files} files (complete)")
+            return downloaded_files > 0
+
+        except Exception as e:
+            log(f"Download error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def poll_training_status(
@@ -674,7 +746,9 @@ class EdgeUploadThread(threading.Thread):
             # Optionally trigger training
             if self.trigger_training:
                 self.current_status = "TRIGGERING_TRAINING"
-                uploader.trigger_training(self.repo_id)
+                success, _ = uploader.trigger_training(self.repo_id)
+                if not success:
+                    log("Warning: Failed to trigger training")
 
             self.success = True
             self.current_status = "COMPLETED"
@@ -747,7 +821,8 @@ def run_edge_upload(
 
     # Trigger training
     if trigger_training:
-        if not uploader.trigger_training(repo_id):
+        success, transaction_id = uploader.trigger_training(repo_id)
+        if not success:
             log("Failed to trigger training")
             return False
 

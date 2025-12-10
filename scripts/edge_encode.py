@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
 """
-Edge encode - Upload raw image datasets to edge server for encoding and training.
+Edge encode - Full workflow: Upload -> Encode -> Train -> Download Model
 
-Use this when CLOUD=2 data collection succeeded locally but edge upload failed,
-or when you want to manually trigger edge encoding for an existing dataset.
+This script handles the complete edge workflow:
+1. Upload raw image dataset to edge server via SFTP
+2. Trigger encoding on edge server
+3. Trigger cloud training
+4. Wait for training completion (showing transaction ID)
+5. Download trained model to local path
+
+The script will NOT exit until training completes and model is downloaded.
+Multiple instances can run in parallel for different datasets.
 
 Usage:
-    # Upload dataset and trigger training
+    # Full workflow: upload -> encode -> train -> download model
     python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (no training)
     python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+
+    # Custom model output path (default: {dataset}/model/)
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --model-output /path/to/model
+
+    # Custom training timeout (default: 120 minutes)
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --timeout 180
 
     # Test connection first
     python scripts/edge_encode.py --test-connection
 
     # Custom repo ID (if different from folder name)
     python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --repo-id custom_name
+
+Output:
+    Default model path: {dataset_path}/model/
 
 Environment variables (from ~/.dorobot_device.conf):
     EDGE_SERVER_HOST     Edge server IP
@@ -243,8 +259,13 @@ def notify_edge_and_encode(repo_id: str) -> bool:
         return False
 
 
-def trigger_training(repo_id: str) -> bool:
-    """Trigger cloud training via edge server or direct API"""
+def trigger_training(repo_id: str) -> tuple:
+    """
+    Trigger cloud training via edge server or direct API.
+
+    Returns:
+        (success: bool, transaction_id: str or None)
+    """
     api_url = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
     api_username = os.environ.get("API_USERNAME", "")
     api_password = os.environ.get("API_PASSWORD", "")
@@ -259,9 +280,12 @@ def trigger_training(repo_id: str) -> bool:
     from operating_platform.core.edge_upload import EdgeUploader
 
     uploader = EdgeUploader()
-    if uploader.trigger_training(repo_id):
+    success, transaction_id = uploader.trigger_training(repo_id)
+    if success:
         logger.info("SUCCESS: Training triggered via edge server")
-        return True
+        if transaction_id:
+            logger.info(f"Transaction ID: {transaction_id}")
+        return True, transaction_id
 
     # Fallback to direct API call
     logger.info("Trying direct API call...")
@@ -294,18 +318,113 @@ def trigger_training(repo_id: str) -> bool:
 
         if response.status_code in (200, 201, 202):
             data = response.json()
+            transaction_id = data.get("transaction_id")
             logger.info(f"SUCCESS: Training started - {data}")
-            return True
+            if transaction_id:
+                logger.info(f"Transaction ID: {transaction_id}")
+            return True, transaction_id
         else:
             logger.error(f"FAILED: API returned {response.status_code}: {response.text}")
-            return False
+            return False, None
 
     except requests.exceptions.ConnectionError:
         logger.error(f"FAILED: Cannot connect to API at {api_url}")
-        return False
+        return False, None
     except Exception as e:
         logger.error(f"FAILED: {e}")
-        return False
+        return False, None
+
+
+def wait_training_and_download(
+    repo_id: str,
+    transaction_id: str,
+    local_model_path: Path,
+    timeout_minutes: int = 120,
+) -> bool:
+    """
+    Wait for training completion and download model to local path.
+
+    Args:
+        repo_id: Dataset repository ID
+        transaction_id: Training transaction ID from API
+        local_model_path: Local path to save model (e.g., dataset_path/model)
+        timeout_minutes: Timeout for training completion (default 120 min)
+
+    Returns:
+        True if training completed and model downloaded successfully
+    """
+    from operating_platform.core.edge_upload import EdgeUploader, EdgeConfig
+
+    config = EdgeConfig.from_env()
+    uploader = EdgeUploader(config)
+
+    logger.info("\n" + "=" * 60)
+    logger.info("Waiting for Training Completion")
+    logger.info("=" * 60)
+    logger.info(f"  Repo ID:        {repo_id}")
+    logger.info(f"  Transaction ID: {transaction_id}")
+    logger.info(f"  Output Model:   {local_model_path}")
+    logger.info(f"  Timeout:        {timeout_minutes} minutes")
+    logger.info("=" * 60)
+
+    # Poll for training status
+    poll_interval = 15  # seconds
+    start_time = time.time()
+    timeout_seconds = timeout_minutes * 60
+
+    last_status = ""
+    while (time.time() - start_time) < timeout_seconds:
+        elapsed = int(time.time() - start_time)
+        elapsed_str = f"{elapsed // 60}m {elapsed % 60}s"
+
+        status = uploader.get_status(repo_id)
+        current_status = status.get("status", "UNKNOWN")
+        progress = status.get("progress", "")
+        model_path = status.get("model_path")
+
+        # Only log if status changed
+        status_str = f"{current_status} {progress}"
+        if status_str != last_status:
+            logger.info(f"[{elapsed_str}] Status: {current_status} {progress}")
+            last_status = status_str
+
+        if current_status == "COMPLETED":
+            logger.info(f"\nTraining completed in {elapsed_str}")
+            if model_path:
+                logger.info(f"Remote model path: {model_path}")
+
+                # Download model
+                logger.info("\n" + "=" * 60)
+                logger.info("Downloading Trained Model")
+                logger.info("=" * 60)
+
+                def progress_cb(p):
+                    logger.info(f"  Download: {p}")
+
+                if uploader.download_model(model_path, str(local_model_path), progress_cb):
+                    logger.info(f"\nModel downloaded to: {local_model_path}")
+                    uploader.close()
+                    return True
+                else:
+                    logger.error("Model download failed")
+                    uploader.close()
+                    return False
+            else:
+                logger.warning("Training completed but no model path returned")
+                uploader.close()
+                return False
+
+        elif current_status in ("FAILED", "ERROR", "CANCELLED"):
+            error = status.get("error", "Unknown error")
+            logger.error(f"\nTraining failed: {error}")
+            uploader.close()
+            return False
+
+        time.sleep(poll_interval)
+
+    logger.error(f"\nTraining timeout after {timeout_minutes} minutes")
+    uploader.close()
+    return False
 
 
 # =============================================================================
@@ -316,15 +435,35 @@ def run_retry_workflow(
     dataset_path: Path,
     repo_id: str,
     skip_training: bool = False,
+    model_output_path: Path = None,
+    timeout_minutes: int = 120,
 ) -> bool:
-    """Run the edge upload retry workflow"""
+    """
+    Run the edge upload retry workflow.
+
+    Args:
+        dataset_path: Path to dataset with raw images
+        repo_id: Repository ID for the dataset
+        skip_training: If True, skip training (just upload + encode)
+        model_output_path: Path to save model (default: dataset_path/model)
+        timeout_minutes: Training timeout in minutes (default: 120)
+
+    Returns:
+        True if workflow completed successfully
+    """
+    # Default model output to dataset_path/model
+    if model_output_path is None:
+        model_output_path = dataset_path / "model"
 
     logger.info("\n" + "=" * 60)
-    logger.info("Retry Edge Upload Workflow")
+    logger.info("Edge Upload Workflow")
     logger.info("=" * 60)
     logger.info(f"Dataset:     {dataset_path}")
     logger.info(f"Repo ID:     {repo_id}")
     logger.info(f"Training:    {'skip' if skip_training else 'enabled'}")
+    if not skip_training:
+        logger.info(f"Model out:   {model_output_path}")
+        logger.info(f"Timeout:     {timeout_minutes} minutes")
     logger.info("=" * 60)
 
     # Validate dataset
@@ -356,26 +495,46 @@ def run_retry_workflow(
     logger.info(f"  Size:     {total_size / 1024 / 1024:.2f} MB")
 
     # Step 1: Upload to edge server
-    logger.info("\n[Step 1/3] Uploading to edge server...")
+    logger.info("\n[Step 1/4] Uploading to edge server...")
     if not upload_to_edge(dataset_path, repo_id):
         logger.error("Upload failed")
         return False
 
     # Step 2: Notify edge server to encode
-    logger.info("\n[Step 2/3] Triggering encoding on edge server...")
+    logger.info("\n[Step 2/4] Triggering encoding on edge server...")
     encode_ok = notify_edge_and_encode(repo_id)
     if not encode_ok:
         logger.error("Encoding notification failed")
 
     # Step 3: Trigger training
     train_ok = True
+    transaction_id = None
     if not skip_training:
-        logger.info("\n[Step 3/3] Triggering cloud training...")
-        train_ok = trigger_training(repo_id)
+        logger.info("\n[Step 3/4] Triggering cloud training...")
+        train_ok, transaction_id = trigger_training(repo_id)
         if not train_ok:
             logger.error("Training trigger failed")
     else:
-        logger.info("\n[Step 3/3] Skipping training (--skip-training)")
+        logger.info("\n[Step 3/4] Skipping training (--skip-training)")
+
+    # Step 4: Wait for training and download model
+    download_ok = True
+    if not skip_training and train_ok and transaction_id:
+        logger.info("\n[Step 4/4] Waiting for training and downloading model...")
+        download_ok = wait_training_and_download(
+            repo_id=repo_id,
+            transaction_id=transaction_id,
+            local_model_path=model_output_path,
+            timeout_minutes=timeout_minutes,
+        )
+        if not download_ok:
+            logger.error("Training/download failed")
+    elif not skip_training and train_ok and not transaction_id:
+        logger.warning("\n[Step 4/4] No transaction ID - cannot wait for training")
+        logger.info("Training was triggered but model won't be downloaded automatically")
+        download_ok = False
+    else:
+        logger.info("\n[Step 4/4] Skipping (training not triggered)")
 
     # Report final status
     from operating_platform.core.edge_upload import EdgeConfig
@@ -383,43 +542,68 @@ def run_retry_workflow(
     upload_path = config.get_upload_path(repo_id)
 
     logger.info("\n" + "=" * 60)
-    if encode_ok and train_ok:
+    if encode_ok and train_ok and download_ok:
         logger.info("WORKFLOW COMPLETED SUCCESSFULLY")
         logger.info("=" * 60)
-        logger.info(f"Repo ID: {repo_id}")
-        logger.info(f"API User: {config.api_username}")
-        logger.info(f"Edge path: {upload_path}/")
+        logger.info(f"Repo ID:     {repo_id}")
+        logger.info(f"API User:    {config.api_username}")
+        logger.info(f"Edge path:   {upload_path}/")
+        if not skip_training:
+            logger.info(f"Model path:  {model_output_path}")
+        return True
+    elif encode_ok and skip_training:
+        logger.info("UPLOAD COMPLETED (training skipped)")
+        logger.info("=" * 60)
+        logger.info(f"Repo ID:     {repo_id}")
+        logger.info(f"API User:    {config.api_username}")
+        logger.info(f"Edge path:   {upload_path}/")
         return True
     else:
         logger.error("WORKFLOW FAILED")
         logger.info("=" * 60)
-        logger.info(f"Repo ID: {repo_id}")
-        logger.info(f"API User: {config.api_username}")
-        logger.info(f"Edge path: {upload_path}/")
+        logger.info(f"Repo ID:     {repo_id}")
+        logger.info(f"API User:    {config.api_username}")
+        logger.info(f"Edge path:   {upload_path}/")
         if not encode_ok:
             logger.error("  - Encoding step failed")
         if not train_ok:
-            logger.error("  - Training step failed")
+            logger.error("  - Training trigger failed")
+        if not download_ok and not skip_training:
+            logger.error("  - Model download failed")
         return False
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Retry edge upload for raw image datasets",
+        description="Edge upload for raw image datasets - upload, encode, train, and download model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Upload and trigger training
+    # Full workflow: upload -> encode -> train -> download model
     python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id
 
     # Upload only (skip training)
     python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_repo_id --skip-training
+
+    # Custom model output path
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --model-output /path/to/model
+
+    # Custom timeout for training
+    python scripts/edge_encode.py --dataset ~/DoRobot/dataset/my_data --timeout 180
 
     # Test connection first
     python scripts/edge_encode.py --test-connection
 
     # Custom repo ID
     python scripts/edge_encode.py --dataset /path/to/data --repo-id my_custom_name
+
+Output:
+    By default, trained model is downloaded to: {dataset_path}/model/
+
+Notes:
+    - This script will NOT exit until training completes and model is downloaded
+    - Multiple instances can run in parallel for different datasets
+    - Use --skip-training if you only want to upload and encode
         """,
     )
     parser.add_argument(
@@ -436,6 +620,17 @@ Examples:
         "--skip-training",
         action="store_true",
         help="Skip training trigger (just upload + encode)",
+    )
+    parser.add_argument(
+        "--model-output",
+        type=Path,
+        help="Path to save trained model (default: {dataset_path}/model/)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Training timeout in minutes (default: 120)",
     )
     parser.add_argument(
         "--test-connection",
@@ -470,11 +665,18 @@ Examples:
     # Use folder name as repo_id if not specified
     repo_id = args.repo_id or dataset_path.name
 
+    # Resolve model output path
+    model_output_path = None
+    if args.model_output:
+        model_output_path = args.model_output.expanduser().resolve()
+
     # Run workflow
     success = run_retry_workflow(
         dataset_path=dataset_path,
         repo_id=repo_id,
         skip_training=args.skip_training,
+        model_output_path=model_output_path,
+        timeout_minutes=args.timeout,
     )
 
     sys.exit(0 if success else 1)
