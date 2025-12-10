@@ -4,6 +4,19 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.96 (2025-12-09) - Fix Quick Start Guide Clarity
+
+### Summary
+Fixed Quick Start guide to clarify that the laptop IS the API server, not a separate edge server.
+
+### Workflow Clarification
+1. **Orange Pi (robot device)**: Collect data with `CLOUD=4` (raw images only)
+2. **USB copy**: Transfer data from Orange Pi to laptop
+3. **Laptop (API server)**: Run `edge.sh` to encode, upload to cloud, download model
+4. **USB copy back**: Transfer model from laptop to Orange Pi for inference
+
+---
+
 ## v0.2.95 (2025-12-09) - README: Edge Server Workflow Quick Start Guide
 
 ### Summary

@@ -264,67 +264,71 @@ bash scripts/run_so101_cli.sh
 | `n` | Save current episode and start new one |
 | `e` | Stop recording and exit |
 
-## Quick Start: Edge Server Workflow (USB Transfer)
+## Quick Start: Offline Data Collection + Cloud Training
 
-This workflow is for scenarios where the robot device has no network access to the edge server. Data is collected locally and transferred via USB.
+This workflow is for scenarios where the robot device (Orange Pi) has no network. Data is collected locally and transferred via USB to a laptop (API server) for processing.
 
 ### Step 1: Collect Data on Robot Device (CLOUD=4)
 
-On your robot device (Orange Pi, laptop with robot):
+On your robot device (Orange Pi):
 
 ```bash
-# Collect data with CLOUD=4 (saves raw images, no encoding)
+# Collect data with CLOUD=4 (saves raw images only, no encoding)
 CLOUD=4 REPO_ID=my-task bash scripts/run_so101.sh
 ```
 
-After collection, your data is at:
+After collection, your data is at `~/DoRobot/dataset/my-task/`:
 ```
 ~/DoRobot/dataset/my-task/
-├── images/
+├── images/           # Raw PNG images (not encoded to video yet)
 │   ├── episode_000000/
 │   └── episode_000001/
 ├── data/
 └── meta/
 ```
 
-### Step 2: Copy Data to Edge Server via USB
+### Step 2: USB Copy to Laptop (API Server)
 
 ```bash
-# On robot device: copy to USB drive
+# On Orange Pi: copy to USB drive
 cp -r ~/DoRobot/dataset/my-task /media/usb-drive/
 
-# On edge server: copy from USB drive
+# On Laptop (API server): copy from USB drive
 cp -r /media/usb-drive/my-task ~/DoRobot/dataset/
 ```
 
-### Step 3: Run edge.sh on Edge Server
+### Step 3: Run edge.sh on Laptop (Post-Processing)
 
-On the edge server, run the full workflow (encode -> train -> download model):
+On the laptop (API server), run edge.sh to process the data:
 
 ```bash
 cd DoRobot
 
-# Full workflow with your credentials
+# Full workflow with your API credentials
 scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task
-
-# The script will:
-# 1. Upload to local edge storage
-# 2. Encode videos on edge server
-# 3. Trigger cloud training
-# 4. Wait for training completion (shows transaction ID)
-# 5. Download trained model to ~/DoRobot/dataset/my-task/model/
 ```
 
-### Step 4: Copy Model Back (Optional)
+**edge.sh will automatically:**
+1. Encode raw images to video (on laptop)
+2. Upload encoded dataset to cloud for training
+3. Wait for cloud training to complete (shows transaction ID)
+4. Download trained model to `~/DoRobot/dataset/my-task/model/`
 
-If you want to run inference on the robot device:
+### Step 4: Copy Model Back to Robot (Optional)
+
+If you want to run inference on the Orange Pi:
 
 ```bash
-# On edge server: copy model to USB
+# On Laptop: copy model to USB
 cp -r ~/DoRobot/dataset/my-task/model /media/usb-drive/
 
-# On robot device: copy model from USB
+# On Orange Pi: copy model from USB
 cp -r /media/usb-drive/model ~/DoRobot/
+```
+
+Then run inference on the robot:
+```bash
+bash scripts/run_so101_inference.sh
 ```
 
 ### edge.sh Usage Reference
