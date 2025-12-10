@@ -4,6 +4,35 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.101 (2025-12-10) - Fix Training Not Starting After Encoding
+
+### Summary
+Fixed issue where training never started after encoding completed.
+The robot would keep polling "READY" status indefinitely.
+
+### Root Cause
+1. Robot calls `/edge/train` while encoding is still in progress
+2. Edge server returns "Dataset still encoding, please wait" but doesn't start training
+3. Encoding completes, status becomes "READY"
+4. Robot keeps polling but never re-triggers training
+5. Status stays at "READY" forever
+
+### Fix
+**edge_upload.py:**
+- `poll_training_status()` now detects "READY" status
+- When "READY" is seen, automatically re-calls `trigger_training()`
+- Tracks `training_triggered` flag to avoid multiple re-triggers
+- Training proceeds after encoding completes
+
+### Behavior After Fix
+1. Upload completes, encoding starts
+2. Robot polls status, sees "ENCODING"
+3. Encoding completes, status becomes "READY"
+4. **Robot detects READY, re-triggers training**
+5. Training starts on cloud GPU
+
+---
+
 ## v0.2.100 (2025-12-10) - Clear Edge Target Folder Before Upload
 
 ### Summary

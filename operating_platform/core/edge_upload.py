@@ -814,6 +814,7 @@ class EdgeUploader:
 
         start_time = time.time()
         timeout_seconds = timeout_minutes * 60
+        training_triggered = False  # Track if we've successfully triggered training
 
         while (time.time() - start_time) < timeout_seconds:
             status = self.get_status(repo_id)
@@ -834,6 +835,16 @@ class EdgeUploader:
                 error = status.get("error", progress or "Unknown error")
                 log(f"Training failed with status '{current_status}': {error}")
                 return False, None
+            elif current_status == "READY" and not training_triggered:
+                # Encoding complete, need to re-trigger training
+                log("Encoding complete, re-triggering training...")
+                success, _ = self.trigger_training(repo_id)
+                if success:
+                    training_triggered = True
+                    log("Training re-triggered successfully")
+                else:
+                    log("Warning: Failed to re-trigger training, will retry...")
+                # Continue polling regardless
 
             time.sleep(poll_interval)
 
