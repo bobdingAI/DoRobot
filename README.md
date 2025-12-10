@@ -264,6 +264,110 @@ bash scripts/run_so101_cli.sh
 | `n` | Save current episode and start new one |
 | `e` | Stop recording and exit |
 
+## Quick Start: Edge Workflow (CLOUD=2) - Recommended
+
+The **CLOUD=2 edge workflow** is the fastest and most automated way to collect data and train models. It uses a local edge server (laptop/PC on same LAN) to offload encoding and cloud training while the robot continues recording.
+
+### Architecture
+
+```
+┌─────────────────┐    rsync/SFTP     ┌─────────────────┐    HTTPS      ┌─────────────────┐
+│  Robot Device   │ ─────────────────→│   Edge Server   │ ────────────→│  Cloud Server   │
+│  (Orange Pi)    │    LAN (~1Gbps)   │  (Laptop/PC)    │   WAN         │  (Training GPU) │
+│                 │                   │                 │               │                 │
+│ - Data capture  │                   │ - Video encode  │               │ - Model train   │
+│ - Raw images    │                   │ - Cloud upload  │               │ - Return model  │
+└─────────────────┘                   └─────────────────┘               └─────────────────┘
+                                              │
+                                              │ SFTP download
+                                              ↓
+                                      ┌─────────────────┐
+                                      │  Trained Model  │
+                                      │ ~/DoRobot/model │
+                                      └─────────────────┘
+```
+
+### Why CLOUD=2?
+
+| Method | Transfer Time (720MB episode) | Robot Waits? |
+|--------|-------------------------------|--------------|
+| Local encode | ~30-60s (NPU) / ~120s (CPU) | Yes |
+| Cloud raw (CLOUD=1) | ~5 min (20 Mbps WAN) | Yes |
+| **Edge (CLOUD=2)** | **~6s (1 Gbps LAN)** | **No** |
+
+### Step 1: Setup Edge Server (One-time)
+
+On your laptop/PC that will serve as the edge server:
+
+```bash
+# Clone DoRobot on edge server
+git clone https://github.com/dora-rs/DoRobot.git
+cd DoRobot
+
+# Install with server dependencies
+pip install -e ".[server]"
+
+# Start edge server (listens on port 8000)
+python -m operating_platform.server.edge_server
+```
+
+### Step 2: Configure Robot Device
+
+On your robot device (Orange Pi), set the edge server connection:
+
+```bash
+# Set edge server IP (laptop's IP on same LAN)
+export EDGE_SERVER_HOST=192.168.1.100
+export EDGE_SERVER_USER=your_username
+export EDGE_SERVER_PASSWORD=your_password  # Optional if using SSH key
+
+# Or configure via detect_usb_ports.py
+python scripts/detect_usb_ports.py --yaml
+```
+
+### Step 3: Collect Data with CLOUD=2
+
+```bash
+# CLOUD=2 is the default, so this is equivalent to:
+# CLOUD=2 bash scripts/run_so101.sh
+bash scripts/run_so101.sh
+```
+
+**What happens automatically:**
+1. Robot captures raw images during recording (no local encoding)
+2. On exit ('e'), raw images are rsynced to edge server (~6 seconds)
+3. Edge server encodes videos and uploads to cloud
+4. Cloud trains the model
+5. Trained model is downloaded to `~/DoRobot/model/`
+6. Robot is ready for inference
+
+### Step 4: Run Inference
+
+```bash
+bash scripts/run_so101_inference.sh
+```
+
+### Edge Server Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EDGE_SERVER_HOST` | `127.0.0.1` | Edge server IP address |
+| `EDGE_SERVER_USER` | `nupylot` | SSH username on edge server |
+| `EDGE_SERVER_PASSWORD` | (empty) | SSH password (uses paramiko if set) |
+| `EDGE_SERVER_PORT` | `22` | SSH port |
+| `EDGE_SERVER_PATH` | `/uploaded_data` | Remote upload directory |
+| `API_BASE_URL` | `http://127.0.0.1:8000` | Edge server API URL |
+| `API_USERNAME` | `default` | API username (for multi-user isolation) |
+
+### Multi-User Support
+
+Multiple users can use the same edge server simultaneously:
+- Each user's data is isolated at `{EDGE_SERVER_PATH}/{API_USERNAME}/{repo_id}/`
+- No conflicts between users with the same repo_id
+- Set `API_USERNAME=alice` to isolate your uploads
+
+---
+
 ## Quick Start: Offline Data Collection + Cloud Training
 
 This workflow is for scenarios where the robot device (Orange Pi) has no network. Data is collected locally and transferred via USB to a laptop (API server) for processing.
