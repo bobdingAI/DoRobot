@@ -23,8 +23,12 @@ Environment variables (from ~/.dorobot_device.conf):
     EDGE_SERVER_USER     SSH username
     EDGE_SERVER_PASSWORD SSH password
     EDGE_SERVER_PORT     SSH port (default: 22)
-    EDGE_SERVER_PATH     Remote upload path
+    EDGE_SERVER_PATH     Remote upload path (default: /uploaded_data)
     API_BASE_URL         API server URL
+    API_USERNAME         API username for path isolation (default: default)
+
+Upload path structure: {EDGE_SERVER_PATH}/{API_USERNAME}/{REPO_ID}/
+    This isolates uploads by user to avoid conflicts on shared API servers.
 """
 
 import os
@@ -111,6 +115,8 @@ def test_connection() -> bool:
     logger.info(f"  User:     {config.user}")
     logger.info(f"  Password: {'*' * len(config.password) if config.password else '(not set)'}")
     logger.info(f"  Path:     {config.remote_path}")
+    logger.info(f"  API User: {config.api_username}")
+    logger.info(f"  Upload:   {config.remote_path}/{config.api_username}/<repo_id>/")
     logger.info("=" * 60)
 
     uploader = EdgeUploader(config)
@@ -154,10 +160,14 @@ def upload_to_edge(dataset_path: Path, repo_id: str) -> bool:
     config = EdgeConfig.from_env()
     uploader = EdgeUploader(config)
 
+    # Full upload path includes username for multi-user isolation
+    upload_path = config.get_upload_path(repo_id)
+
     logger.info("=" * 60)
     logger.info("Edge Upload")
     logger.info(f"  Local:  {dataset_path}")
-    logger.info(f"  Remote: {config.user}@{config.host}:{config.remote_path}/{repo_id}/")
+    logger.info(f"  Remote: {config.user}@{config.host}:{upload_path}/")
+    logger.info(f"  API User: {config.api_username}")
     logger.info("=" * 60)
 
     if not uploader.test_connection():
@@ -368,19 +378,24 @@ def run_retry_workflow(
         logger.info("\n[Step 3/3] Skipping training (--skip-training)")
 
     # Report final status
-    edge_path = os.environ.get('EDGE_SERVER_PATH', '/uploaded_data')
+    from operating_platform.core.edge_upload import EdgeConfig
+    config = EdgeConfig.from_env()
+    upload_path = config.get_upload_path(repo_id)
+
     logger.info("\n" + "=" * 60)
     if encode_ok and train_ok:
         logger.info("WORKFLOW COMPLETED SUCCESSFULLY")
         logger.info("=" * 60)
         logger.info(f"Repo ID: {repo_id}")
-        logger.info(f"Edge path: {edge_path}/{repo_id}/")
+        logger.info(f"API User: {config.api_username}")
+        logger.info(f"Edge path: {upload_path}/")
         return True
     else:
         logger.error("WORKFLOW FAILED")
         logger.info("=" * 60)
         logger.info(f"Repo ID: {repo_id}")
-        logger.info(f"Edge path: {edge_path}/{repo_id}/")
+        logger.info(f"API User: {config.api_username}")
+        logger.info(f"Edge path: {upload_path}/")
         if not encode_ok:
             logger.error("  - Encoding step failed")
         if not train_ok:
