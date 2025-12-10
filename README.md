@@ -274,12 +274,12 @@ On your robot device (Orange Pi):
 
 ```bash
 # Collect data with CLOUD=4 (saves raw images only, no encoding)
-CLOUD=4 REPO_ID=my-task bash scripts/run_so101.sh
+CLOUD=4 bash scripts/run_so101.sh
 ```
 
-After collection, your data is at `~/DoRobot/dataset/my-task/`:
+Data is saved to default location `~/DoRobot/dataset/so101-test/`:
 ```
-~/DoRobot/dataset/my-task/
+~/DoRobot/dataset/so101-test/
 ├── images/           # Raw PNG images (not encoded to video yet)
 │   ├── episode_000000/
 │   └── episode_000001/
@@ -291,10 +291,10 @@ After collection, your data is at `~/DoRobot/dataset/my-task/`:
 
 ```bash
 # On Orange Pi: copy to USB drive
-cp -r ~/DoRobot/dataset/my-task /media/usb-drive/
+cp -r ~/DoRobot/dataset/so101-test /media/usb-drive/
 
 # On Laptop (API server): copy from USB drive
-cp -r /media/usb-drive/my-task ~/DoRobot/dataset/
+cp -r /media/usb-drive/so101-test ~/DoRobot/dataset/
 ```
 
 ### Step 3: Run edge.sh on Laptop (Post-Processing)
@@ -305,14 +305,14 @@ On the laptop (API server), run edge.sh to process the data:
 cd DoRobot
 
 # Full workflow with your API credentials
-scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/so101-test
 ```
 
 **edge.sh will automatically:**
 1. Encode raw images to video (on laptop)
 2. Upload encoded dataset to cloud for training
 3. Wait for cloud training to complete (shows transaction ID)
-4. Download trained model to `~/DoRobot/dataset/my-task/model/`
+4. Download trained model to `~/DoRobot/dataset/so101-test/model/`
 
 ### Step 4: Copy Model Back to Robot (Optional)
 
@@ -320,7 +320,7 @@ If you want to run inference on the Orange Pi:
 
 ```bash
 # On Laptop: copy model to USB
-cp -r ~/DoRobot/dataset/my-task/model /media/usb-drive/
+cp -r ~/DoRobot/dataset/so101-test/model /media/usb-drive/
 
 # On Orange Pi: copy model from USB
 cp -r /media/usb-drive/model ~/DoRobot/
