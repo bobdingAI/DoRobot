@@ -4,6 +4,27 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.105 (2025-12-10) - Update Edge Upload Documentation
+
+### Summary
+Updated `docs/edge_upload.md` with comprehensive workflow documentation covering
+the complete CLOUD_OFFLOAD=2 edge upload and model download flow.
+
+### Documentation Added
+- Architecture diagram showing bidirectional flow (upload + download)
+- Two SSH credential sets explanation (Edge SSH vs Cloud SSH)
+- Complete data flow diagrams for all 4 phases:
+  1. Image Upload (Client → Edge)
+  2. Encoding + Cloud Upload (Edge → Cloud)
+  3. Training Completion Detection
+  4. Model Download (Cloud → Client)
+- Training completion detection methods (API status + SSH folder check fallback)
+- Code examples for DoRobot client download implementation
+- API endpoint documentation with request/response examples
+- Version history section
+
+---
+
 ## v0.2.104 (2025-12-10) - Use SFTP for Model Download (like cloud_train.py)
 
 ### Summary
