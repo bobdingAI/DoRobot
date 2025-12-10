@@ -4,6 +4,29 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.95 (2025-12-09) - README: Edge Server Workflow Quick Start Guide
+
+### Summary
+Added comprehensive documentation for the USB transfer workflow using CLOUD=4 and edge.sh.
+
+### New Documentation
+
+**Quick Start: Edge Server Workflow (USB Transfer)**
+- Step 1: Collect data on robot device with CLOUD=4
+- Step 2: Copy data to edge server via USB
+- Step 3: Run edge.sh on edge server (encode -> train -> download)
+- Step 4: Copy model back (optional)
+
+**Updated CLOUD Modes**
+- Added CLOUD=4 (Local raw) to mode tables and examples
+- CLOUD=4 saves raw images only, no encoding, perfect for USB transfer
+
+**edge.sh Reference**
+- Complete usage reference with all options
+- Multi-user support documentation
+
+---
+
 ## v0.2.94 (2025-12-09) - Multi-User edge.sh with Mandatory Credentials
 
 ### Summary

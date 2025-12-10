@@ -203,7 +203,7 @@ REPO_ID=my-dataset bash scripts/run_so101.sh
 REPO_ID=my-dataset SINGLE_TASK="pick up the cube" bash scripts/run_so101.sh
 ```
 
-**Cloud Upload Modes (CLOUD=0,1,2,3):**
+**Cloud Upload Modes (CLOUD=0,1,2,3,4):**
 ```bash
 # Mode 0: Local only (encode locally, no upload)
 CLOUD=0 bash scripts/run_so101.sh
@@ -216,6 +216,9 @@ CLOUD=2 bash scripts/run_so101.sh
 
 # Mode 3: Cloud encoded (encode locally, upload encoded to cloud)
 CLOUD=3 bash scripts/run_so101.sh
+
+# Mode 4: Local raw (save raw images only, no encoding, for USB transfer)
+CLOUD=4 bash scripts/run_so101.sh
 ```
 
 **NPU Options (NPU=0,1):**
@@ -260,6 +263,110 @@ bash scripts/run_so101_cli.sh
 |-----|--------|
 | `n` | Save current episode and start new one |
 | `e` | Stop recording and exit |
+
+## Quick Start: Edge Server Workflow (USB Transfer)
+
+This workflow is for scenarios where the robot device has no network access to the edge server. Data is collected locally and transferred via USB.
+
+### Step 1: Collect Data on Robot Device (CLOUD=4)
+
+On your robot device (Orange Pi, laptop with robot):
+
+```bash
+# Collect data with CLOUD=4 (saves raw images, no encoding)
+CLOUD=4 REPO_ID=my-task bash scripts/run_so101.sh
+```
+
+After collection, your data is at:
+```
+~/DoRobot/dataset/my-task/
+├── images/
+│   ├── episode_000000/
+│   └── episode_000001/
+├── data/
+└── meta/
+```
+
+### Step 2: Copy Data to Edge Server via USB
+
+```bash
+# On robot device: copy to USB drive
+cp -r ~/DoRobot/dataset/my-task /media/usb-drive/
+
+# On edge server: copy from USB drive
+cp -r /media/usb-drive/my-task ~/DoRobot/dataset/
+```
+
+### Step 3: Run edge.sh on Edge Server
+
+On the edge server, run the full workflow (encode -> train -> download model):
+
+```bash
+cd DoRobot
+
+# Full workflow with your credentials
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task
+
+# The script will:
+# 1. Upload to local edge storage
+# 2. Encode videos on edge server
+# 3. Trigger cloud training
+# 4. Wait for training completion (shows transaction ID)
+# 5. Download trained model to ~/DoRobot/dataset/my-task/model/
+```
+
+### Step 4: Copy Model Back (Optional)
+
+If you want to run inference on the robot device:
+
+```bash
+# On edge server: copy model to USB
+cp -r ~/DoRobot/dataset/my-task/model /media/usb-drive/
+
+# On robot device: copy model from USB
+cp -r /media/usb-drive/model ~/DoRobot/
+```
+
+### edge.sh Usage Reference
+
+```bash
+scripts/edge.sh -u <username> -p <password> -d <dataset_path> [options]
+
+Required:
+  -u, --username      API username (for authentication and path isolation)
+  -p, --password      API password
+  -d, --dataset       Path to dataset directory with raw images
+
+Optional:
+  --skip-training     Skip training (just upload + encode)
+  --repo-id NAME      Custom repo ID (default: folder name)
+  --model-output PATH Custom model output path (default: dataset/model/)
+  --timeout MINUTES   Training timeout in minutes (default: 120)
+  --test-connection   Only test SSH and API connections
+```
+
+### Examples
+
+```bash
+# Full workflow for user "alice"
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task
+
+# Skip training (just encode and upload)
+scripts/edge.sh -u bob -p bob456 -d ~/DoRobot/dataset/my-task --skip-training
+
+# Custom training timeout (3 hours)
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task --timeout 180
+
+# Test connection first
+scripts/edge.sh -u alice -p alice123 --test-connection
+```
+
+### Multi-User Support
+
+Multiple users can run edge.sh simultaneously on the same edge server:
+- Each user's data is isolated at `/uploaded_data/{username}/{repo_id}/`
+- No conflicts between users with the same repo_id
+- API credentials are required for authentication
 
 ## Training
 
@@ -352,6 +459,7 @@ python operating_platform/core/inference.py \
 | 1 | Cloud raw | Cloud | Raw images | Cloud |
 | 2 | Edge | Edge server | Raw images | Cloud |
 | 3 | Cloud encoded | Local | Encoded videos | Cloud |
+| 4 | Local raw | None | None | None (for USB transfer) |
 
 ## Project Structure
 
