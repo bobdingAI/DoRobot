@@ -822,18 +822,22 @@ class EdgeUploader:
             current_status = status.get("status", "UNKNOWN")
             progress = status.get("progress", "")
 
+            # Include transaction_id in logs for debugging
+            tx_id = status.get("transaction_id", "")
+            tx_suffix = f" (tx={tx_id})" if tx_id else ""
+
             if status_callback:
                 status_callback(current_status, progress)
             else:
-                log(f"Status: {current_status}, Progress: {progress}")
+                log(f"Status: {current_status}, Progress: {progress}{tx_suffix}")
 
             if current_status == "COMPLETED":
                 model_path = status.get("model_path")
-                log(f"Training completed! Model path: {model_path}")
+                log(f"Training completed!{tx_suffix} Model path: {model_path}")
                 return True, model_path
             elif current_status in ("FAILED", "ERROR", "UPLOAD_FAILED", "ENCODING_FAILED", "TRAINING_FAILED"):
                 error = status.get("error", progress or "Unknown error")
-                log(f"Training failed with status '{current_status}': {error}")
+                log(f"Training failed with status '{current_status}'{tx_suffix}: {error}")
                 return False, None
             elif current_status == "READY" and not training_triggered:
                 # Encoding complete, need to re-trigger training

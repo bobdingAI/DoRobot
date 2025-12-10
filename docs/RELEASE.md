@@ -4,6 +4,28 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.102 (2025-12-10) - Add Transaction ID to Edge Upload Logs
+
+### Summary
+Added transaction_id to edge upload status logs for easier debugging.
+When polling training status, logs now show which transaction to check on the server.
+
+### Changes
+
+**edge_upload.py:**
+- `poll_training_status()` now extracts transaction_id from status response
+- Status logs include transaction_id: `Status: TRAINING, Progress: xxx (tx=abc123)`
+- Completion and failure logs also include transaction_id
+- Makes it easy to correlate client logs with server admin console
+
+### Example Output
+```
+[EdgeUpload] Status: TRAINING, Progress: Training in progress (tx=abc12345-1234-5678-abcd-123456789abc)
+[EdgeUpload] Training completed! (tx=abc12345-...) Model path: /path/to/model
+```
+
+---
+
 ## v0.2.101 (2025-12-10) - Fix Training Not Starting After Encoding
 
 ### Summary
