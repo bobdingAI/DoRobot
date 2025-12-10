@@ -555,33 +555,44 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         logging.info(f"Dataset path: {upload_dataset_path}")
 
                         if offload_mode == OFFLOAD_EDGE:
-                            # Edge upload mode - rsync to edge server
+                            # Edge upload mode - rsync to edge server, wait for training, download model
                             logging.info("="*50)
                             logging.info("Starting edge upload workflow...")
+                            logging.info("Will wait for training completion and model download")
                             logging.info("="*50)
+
+                            # Model output path: ~/DoRobot/model
+                            dorobot_home = Path.home() / "DoRobot"
+                            model_output_path = dorobot_home / "model"
+                            model_output_path.mkdir(parents=True, exist_ok=True)
+                            logging.info(f"Model output path: {model_output_path}")
 
                             try:
                                 success = run_edge_upload(
                                     dataset_path=upload_dataset_path,
                                     repo_id=repo_id,
                                     trigger_training=True,
-                                    wait_for_training=False,  # Don't block - edge server handles training
+                                    wait_for_training=True,  # Wait for training completion
+                                    timeout_minutes=120,  # 2 hours timeout
+                                    model_output_path=str(model_output_path),  # Download model after training
                                 )
                                 if success:
                                     logging.info("="*50)
-                                    logging.info("EDGE UPLOAD COMPLETED!")
-                                    logging.info("Edge server will encode and upload to cloud")
+                                    logging.info("EDGE WORKFLOW COMPLETED SUCCESSFULLY!")
+                                    logging.info(f"Model downloaded to: {model_output_path}")
                                     logging.info("="*50)
-                                    log_say("Edge upload complete. Training will start on server.", play_sounds=True)
+                                    logging.info("Model download completed. Ready to run inference.")
+                                    log_say("Model download completed. Ready to run inference.", play_sounds=True)
                                 else:
                                     logging.error("=" * 50)
-                                    logging.error("EDGE UPLOAD FAILED")
+                                    logging.error("EDGE WORKFLOW FAILED")
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
                                     logging.error("=" * 50)
-                                    log_say("Edge upload failed. Local data saved.", play_sounds=True)
+                                    log_say("Edge workflow failed. Local data saved.", play_sounds=True)
                             except Exception as e:
                                 logging.error(f"Edge upload error: {e}")
                                 logging.error(f"Local data preserved at: {upload_dataset_path}")
+                                traceback.print_exc()
                                 log_say("Edge upload error. Local data saved.", play_sounds=True)
 
                         elif offload_mode == OFFLOAD_CLOUD_RAW:
@@ -751,30 +762,40 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 logging.info(f"Dataset path: {upload_dataset_path}")
 
                 if offload_mode == OFFLOAD_EDGE:
-                    # Edge upload mode - rsync to edge server
+                    # Edge upload mode - rsync to edge server, wait for training, download model
                     logging.info("="*50)
                     logging.info("Starting edge upload workflow...")
+                    logging.info("Will wait for training completion and model download")
                     logging.info("="*50)
+
+                    # Model output path: ~/DoRobot/model
+                    dorobot_home = Path.home() / "DoRobot"
+                    model_output_path = dorobot_home / "model"
+                    model_output_path.mkdir(parents=True, exist_ok=True)
+                    logging.info(f"Model output path: {model_output_path}")
 
                     try:
                         success = run_edge_upload(
                             dataset_path=upload_dataset_path,
                             repo_id=repo_id,
                             trigger_training=True,
-                            wait_for_training=False,  # Don't block - edge server handles training
+                            wait_for_training=True,  # Wait for training completion
+                            timeout_minutes=120,  # 2 hours timeout
+                            model_output_path=str(model_output_path),  # Download model after training
                         )
                         if success:
                             logging.info("="*50)
-                            logging.info("EDGE UPLOAD COMPLETED!")
-                            logging.info("Edge server will encode and upload to cloud")
+                            logging.info("EDGE WORKFLOW COMPLETED SUCCESSFULLY!")
+                            logging.info(f"Model downloaded to: {model_output_path}")
                             logging.info("="*50)
-                            log_say("Edge upload complete. Training will start on server.", play_sounds=True)
+                            logging.info("Model download completed. Ready to run inference.")
+                            log_say("Model download completed. Ready to run inference.", play_sounds=True)
                         else:
                             logging.error("=" * 50)
-                            logging.error("EDGE UPLOAD FAILED")
+                            logging.error("EDGE WORKFLOW FAILED")
                             logging.error(f"Local data preserved at: {upload_dataset_path}")
                             logging.error("=" * 50)
-                            log_say("Edge upload failed. Local data saved.", play_sounds=True)
+                            log_say("Edge workflow failed. Local data saved.", play_sounds=True)
                     except Exception as e:
                         logging.error(f"Edge upload error: {e}")
                         logging.error(f"Local data preserved at: {upload_dataset_path}")

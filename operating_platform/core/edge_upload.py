@@ -411,6 +411,76 @@ class EdgeUploader:
             log(f"Error creating remote directory: {e}")
             return False
 
+    def clear_remote_directory(self, subpath: str = "") -> bool:
+        """
+        Clear (remove all contents of) a directory on edge server.
+        The directory itself is preserved, only its contents are deleted.
+
+        Args:
+            subpath: Subdirectory path relative to remote_path
+
+        Returns:
+            True if successful
+        """
+        remote_path = self.config.remote_path
+        if subpath:
+            remote_path = f"{remote_path}/{subpath}"
+
+        log(f"Clearing remote directory: {remote_path}")
+
+        # Use paramiko if password is set
+        if self._use_paramiko():
+            try:
+                # Remove all contents but keep the directory
+                # Using rm -rf with glob to clear contents, then recreate empty dir
+                exit_code, stdout, stderr = self._exec_remote_command(
+                    f"rm -rf '{remote_path}'/* '{remote_path}'/.[!.]* 2>/dev/null; mkdir -p '{remote_path}'"
+                )
+                if exit_code == 0:
+                    log("Remote directory cleared (paramiko)")
+                    return True
+                else:
+                    # rm might fail if directory is empty (no matches), but mkdir should succeed
+                    # Check if directory exists and is accessible
+                    check_code, _, _ = self._exec_remote_command(f"test -d '{remote_path}'")
+                    if check_code == 0:
+                        log("Remote directory cleared (was empty or cleared)")
+                        return True
+                    log(f"Failed to clear directory: {stderr}")
+                    return False
+            except Exception as e:
+                log(f"Error clearing remote directory: {e}")
+                return False
+
+        # Fall back to subprocess SSH
+        ssh_cmd = self._build_ssh_cmd([
+            "sh", "-c",
+            f"rm -rf '{remote_path}'/* '{remote_path}'/.[!.]* 2>/dev/null; mkdir -p '{remote_path}'"
+        ])
+
+        try:
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            # Check if directory exists after clearing
+            check_cmd = self._build_ssh_cmd(["test", "-d", remote_path])
+            check_result = subprocess.run(check_cmd, capture_output=True, timeout=10)
+
+            if check_result.returncode == 0:
+                log("Remote directory cleared")
+                return True
+            else:
+                log(f"Failed to clear directory: {result.stderr}")
+                return False
+
+        except Exception as e:
+            log(f"Error clearing remote directory: {e}")
+            return False
+
     def _sftp_upload_directory(
         self,
         local_dir: str,
@@ -488,6 +558,10 @@ class EdgeUploader:
         # Create remote directory (includes username subdirectory)
         if not self.create_remote_directory(upload_subpath):
             return False
+
+        # Clear remote directory before upload to avoid leftover files
+        if not self.clear_remote_directory(upload_subpath):
+            log("Warning: Failed to clear remote directory, continuing with upload...")
 
         start_time = time.time()
         remote_path = upload_path

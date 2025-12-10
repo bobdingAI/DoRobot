@@ -4,6 +4,28 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.100 (2025-12-10) - Clear Edge Target Folder Before Upload
+
+### Summary
+Added automatic clearing of target folder on edge server before SFTP upload.
+This prevents leftover files from previous uploads causing issues.
+
+### Changes
+
+**edge_upload.py:**
+- Added `clear_remote_directory()` method to clear remote folder contents
+- `sync_dataset()` now calls `clear_remote_directory()` before uploading
+- Works with both paramiko (password) and SSH key authentication
+- Non-fatal: if clear fails, upload continues with a warning
+
+### Behavior
+Before each CLOUD=2 upload:
+1. Create remote directory (if not exists)
+2. **NEW:** Clear all contents from remote directory
+3. Upload dataset files via SFTP
+
+---
+
 ## v0.2.99 (2025-12-09) - Fix CLOUD=2 Cloud Credentials Passing
 
 ### Summary
