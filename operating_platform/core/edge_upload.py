@@ -48,11 +48,63 @@ DEFAULT_EDGE_PATH = os.environ.get("EDGE_SERVER_PATH", "/uploaded_data")
 DEFAULT_EDGE_API_URL = os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", "http://127.0.0.1:8000"))
 # API username for multi-user upload path isolation
 DEFAULT_API_USERNAME = os.environ.get("API_USERNAME", "default")
+# API password for cloud training authentication (passed to edge server for cloud upload)
+DEFAULT_API_PASSWORD = os.environ.get("API_PASSWORD", "")
 
 
 def log(message: str):
     """Print timestamped log messages"""
     logging.info(f"[EdgeUpload] {message}")
+
+
+def modify_config_device(local_model_path: str, from_device: str = "npu", to_device: str = "cuda") -> bool:
+    """
+    Modify config.json device setting after model download.
+    Borrowed from train.py for consistency.
+
+    Args:
+        local_model_path: Path to downloaded model directory
+        from_device: Original device in config (default: npu)
+        to_device: Target device to set (default: cuda)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    import json
+    config_path = Path(local_model_path) / "config.json"
+
+    if not config_path.exists():
+        log(f"config.json not found at {config_path}")
+        return False
+
+    try:
+        log(f"Modifying config.json device from '{from_device}' to '{to_device}'...")
+
+        # Read the config file
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        # Check if device field exists
+        if 'device' not in config_data:
+            log("'device' field not found in config.json")
+            return False
+
+        original_device = config_data.get('device', 'unknown')
+        log(f"Current device: {original_device}")
+
+        # Modify the device field
+        config_data['device'] = to_device
+
+        # Write back to file
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=4, ensure_ascii=False)
+
+        log(f"Successfully updated device from '{original_device}' to '{to_device}' in config.json")
+        return True
+
+    except Exception as e:
+        log(f"Failed to modify config.json: {e}")
+        return False
 
 
 @dataclass
@@ -65,6 +117,7 @@ class EdgeConfig:
     remote_path: str = DEFAULT_EDGE_PATH
     api_url: str = DEFAULT_EDGE_API_URL
     api_username: str = DEFAULT_API_USERNAME  # API username for path isolation
+    api_password: str = DEFAULT_API_PASSWORD  # API password for cloud training auth
     ssh_key: Optional[str] = None  # Path to SSH private key (alternative to password)
 
     @classmethod
@@ -78,6 +131,7 @@ class EdgeConfig:
             remote_path=os.environ.get("EDGE_SERVER_PATH", DEFAULT_EDGE_PATH),
             api_url=os.environ.get("API_BASE_URL", os.environ.get("EDGE_API_URL", DEFAULT_EDGE_API_URL)),
             api_username=os.environ.get("API_USERNAME", DEFAULT_API_USERNAME),
+            api_password=os.environ.get("API_PASSWORD", DEFAULT_API_PASSWORD),
             ssh_key=os.environ.get("EDGE_SERVER_KEY"),
         )
 
@@ -503,19 +557,29 @@ class EdgeUploader:
 
         Note:
             Dataset path sent to API is: {remote_path}/{api_username}/{repo_id}
+            Cloud credentials are passed so edge server can upload to cloud training server.
         """
         upload_path = self.config.get_upload_path(repo_id)
         log(f"Notifying edge server: upload complete for {repo_id}")
         log(f"  Dataset path: {upload_path}")
 
+        # Build request payload with cloud credentials for edge server to use
+        payload = {
+            "repo_id": repo_id,
+            "dataset_path": upload_path,
+            "username": self.config.api_username,
+        }
+
+        # Add cloud credentials if available (for edge server to forward to cloud)
+        if self.config.api_password:
+            payload["cloud_username"] = self.config.api_username
+            payload["cloud_password"] = self.config.api_password
+            log(f"  Cloud credentials: included for {self.config.api_username}")
+
         try:
             response = requests.post(
                 f"{self.config.api_url}/edge/upload-complete",
-                json={
-                    "repo_id": repo_id,
-                    "dataset_path": upload_path,
-                    "username": self.config.api_username,
-                },
+                json=payload,
                 timeout=30,
             )
 
@@ -556,13 +620,27 @@ class EdgeUploader:
 
         Returns:
             (success, transaction_id) tuple
+
+        Note:
+            Cloud credentials are passed so edge server can authenticate with cloud.
         """
         log(f"Triggering cloud training for {repo_id}")
+
+        # Build request payload with cloud credentials
+        payload = {
+            "repo_id": repo_id,
+            "username": self.config.api_username,
+        }
+
+        # Add cloud credentials if available (for edge server to forward to cloud)
+        if self.config.api_password:
+            payload["cloud_username"] = self.config.api_username
+            payload["cloud_password"] = self.config.api_password
 
         try:
             response = requests.post(
                 f"{self.config.api_url}/edge/train",
-                json={"repo_id": repo_id, "username": self.config.api_username},
+                json=payload,
                 timeout=30,
             )
 
@@ -678,9 +756,9 @@ class EdgeUploader:
                 model_path = status.get("model_path")
                 log(f"Training completed! Model path: {model_path}")
                 return True, model_path
-            elif current_status in ("FAILED", "ERROR"):
-                error = status.get("error", "Unknown error")
-                log(f"Training failed: {error}")
+            elif current_status in ("FAILED", "ERROR", "UPLOAD_FAILED", "ENCODING_FAILED", "TRAINING_FAILED"):
+                error = status.get("error", progress or "Unknown error")
+                log(f"Training failed with status '{current_status}': {error}")
                 return False, None
 
             time.sleep(poll_interval)
@@ -781,7 +859,8 @@ def run_edge_upload(
     repo_id: str,
     trigger_training: bool = True,
     wait_for_training: bool = False,
-    timeout_minutes: int = 60,
+    timeout_minutes: int = 120,
+    model_output_path: Optional[str] = None,
     status_callback: Optional[Callable[[str, str], None]] = None,
 ) -> bool:
     """
@@ -792,11 +871,12 @@ def run_edge_upload(
         repo_id: Dataset repository ID
         trigger_training: Whether to trigger cloud training after upload
         wait_for_training: Whether to wait for training completion
-        timeout_minutes: Training timeout in minutes
+        timeout_minutes: Training timeout in minutes (default: 120)
+        model_output_path: Local path to download model after training (optional)
         status_callback: Optional callback(status, progress)
 
     Returns:
-        True if upload (and optionally training) successful
+        True if upload (and optionally training + model download) successful
     """
     uploader = EdgeUploader()
 
@@ -828,11 +908,39 @@ def run_edge_upload(
 
         # Wait for training if requested
         if wait_for_training:
-            success, _ = uploader.poll_training_status(
+            success, remote_model_path = uploader.poll_training_status(
                 repo_id,
                 timeout_minutes=timeout_minutes,
                 status_callback=status_callback,
             )
-            return success
+
+            if not success:
+                log("Training failed or timed out")
+                return False
+
+            # Download model if output path specified and training succeeded
+            if model_output_path and remote_model_path:
+                log(f"Downloading model to {model_output_path}...")
+                if status_callback:
+                    status_callback("DOWNLOADING_MODEL", "Starting download...")
+
+                download_success = uploader.download_model(
+                    remote_model_path,
+                    model_output_path,
+                    progress_callback=lambda p: status_callback("DOWNLOADING_MODEL", p) if status_callback else None
+                )
+
+                if not download_success:
+                    log("Model download failed")
+                    return False
+
+                log(f"Model downloaded successfully to: {model_output_path}")
+
+                # Post-processing: modify config.json device setting for local inference
+                log("Post-download processing: updating config.json device setting...")
+                if not modify_config_device(model_output_path, from_device="npu", to_device="cuda"):
+                    log("Warning: Failed to update config.json device setting, but continuing...")
+
+            return True
 
     return True

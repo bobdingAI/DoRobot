@@ -4,6 +4,44 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.99 (2025-12-09) - Fix CLOUD=2 Cloud Credentials Passing
+
+### Summary
+Fixed CLOUD=2 workflow where edge server failed to upload to cloud due to missing credentials.
+
+### Root Cause
+- Robot device loads API_PASSWORD from ~/.dorobot_device.conf
+- API_PASSWORD was NOT exported to Python (edge_upload.py)
+- edge_upload.py did not pass cloud credentials in API requests
+- Edge server had no credentials to authenticate with cloud training server
+
+### Fix Details
+
+**run_so101.sh:**
+- Added `export API_PASSWORD` (line 597) to pass cloud credentials to Python
+
+**edge_upload.py:**
+- Added `DEFAULT_API_PASSWORD` constant reading from `API_PASSWORD` env var
+- Added `api_password` field to `EdgeConfig` dataclass
+- Updated `from_env()` to read `API_PASSWORD`
+- `notify_upload_complete()` now passes `cloud_username` and `cloud_password` in JSON payload
+- `trigger_training()` now passes `cloud_username` and `cloud_password` in JSON payload
+
+### Credential Flow (After Fix)
+```
+~/.dorobot_device.conf (API_PASSWORD)
+       ↓
+run_so101.sh (export API_PASSWORD)
+       ↓
+edge_upload.py (EdgeConfig.api_password)
+       ↓
+POST /edge/upload-complete {cloud_username, cloud_password}
+       ↓
+Edge Server → Cloud Training Server (authenticated)
+```
+
+---
+
 ## v0.2.97 (2025-12-09) - README: CLOUD=2 Edge Workflow Documentation
 
 ### Summary

@@ -17,7 +17,7 @@
 set -e
 
 # Version
-VERSION="0.2.91"
+VERSION="0.2.99"
 
 # Configuration - Single unified environment
 CONDA_ENV="${CONDA_ENV:-dorobot}"
@@ -594,6 +594,7 @@ start_cli() {
     export EDGE_SERVER_PATH
     export API_BASE_URL
     export API_USERNAME
+    export API_PASSWORD  # Cloud training credentials for edge server
 
     # Build command arguments
     local cmd_args=(
