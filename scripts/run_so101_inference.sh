@@ -13,31 +13,66 @@
 #   bash scripts/run_so101_inference.sh
 #   bash scripts/run_so101_inference.sh ~/DoRobot/dataset/my-task ~/DoRobot/model "Pick the apple"
 #
-# Environment Variables:
+# Device Configuration:
+#   Uses the same config file as run_so101.sh for port consistency.
+#   Create config with: python scripts/detect_usb_ports.py --save
+#   Config locations (checked in order):
+#     1. ~/.dorobot_device.conf
+#     2. /etc/dorobot/device.conf
+#     3. $PROJECT_ROOT/.device.conf
+#
+# Environment Variables (override config file):
 #   REPO_ID           - Dataset repo ID (default: so101-test)
 #   SINGLE_TASK       - Task description
-#   CAMERA_TOP_PATH   - Camera top path/index (default: 0)
-#   CAMERA_WRIST_PATH - Camera wrist path/index (default: 2)
-#   ARM_FOLLOWER_PORT - Follower arm port (default: /dev/ttyACM0)
+#   CAMERA_TOP_PATH   - Camera top path/index
+#   CAMERA_WRIST_PATH - Camera wrist path/index
+#   ARM_FOLLOWER_PORT - Follower arm port
 # =============================================================================
 
 set -e
 
-# Configuration
+# Paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DORA_DIR="$PROJECT_ROOT/operating_platform/robot/robots/so101_v1"
+DORA_GRAPH="dora_control_dataflow.yml"
+
+# =============================================================================
+# LOAD CONFIG FILE (same as run_so101.sh for consistency)
+# =============================================================================
+DEVICE_CONFIG_FILES=(
+    "$HOME/.dorobot_device.conf"
+    "/etc/dorobot/device.conf"
+    "$PROJECT_ROOT/.device.conf"
+)
+
+# Load device config if available (BEFORE setting defaults)
+LOADED_DEVICE_CONFIG=""
+for config_file in "${DEVICE_CONFIG_FILES[@]}"; do
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+        LOADED_DEVICE_CONFIG="$config_file"
+        break
+    fi
+done
+
+# =============================================================================
+# DEFAULT VALUES (only used if not set by config file or environment)
+# =============================================================================
+CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
+CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
+ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-/dev/ttyACM0}"
+
+# Export for DORA dataflow
+export CAMERA_TOP_PATH
+export CAMERA_WRIST_PATH
+export ARM_FOLLOWER_PORT
+
+# Script arguments
 REPO_ID="${REPO_ID:-so101-test}"
 DATASET_PATH="${1:-$HOME/DoRobot/dataset/$REPO_ID}"
 MODEL_PATH="${2:-$HOME/DoRobot/model}"
 SINGLE_TASK="${3:-${SINGLE_TASK:-Perform the trained task.}}"
-
-# Device ports
-export CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
-export CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
-export ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-/dev/ttyACM0}"
-
-# Paths
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DORA_DIR="$PROJECT_ROOT/operating_platform/robot/robots/so101_v1"
-DORA_GRAPH="dora_control_dataflow.yml"
 
 echo "=================================================="
 echo "SO101 Inference Launcher"
@@ -46,6 +81,11 @@ echo "Dataset:    $DATASET_PATH"
 echo "Model:      $MODEL_PATH"
 echo "Task:       $SINGLE_TASK"
 echo "--------------------------------------------------"
+if [ -n "$LOADED_DEVICE_CONFIG" ]; then
+    echo "Config:     $LOADED_DEVICE_CONFIG"
+else
+    echo "Config:     (using defaults)"
+fi
 echo "Cameras:    top=$CAMERA_TOP_PATH, wrist=$CAMERA_WRIST_PATH"
 echo "Arm:        follower=$ARM_FOLLOWER_PORT"
 echo "=================================================="
