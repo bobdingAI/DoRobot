@@ -4,6 +4,32 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.107 (2025-12-11) - Simplify inference.sh for Two-Terminal Workflow
+
+### Summary
+Simplified `run_so101_inference.sh` to only run the Python inference command.
+User now starts DORA manually in a separate terminal first.
+
+### Workflow
+```bash
+# Terminal 1: Start DORA
+cd operating_platform/robot/robots/so101_v1
+dora run dora_control_dataflow.yml      # Follower only (recommended)
+# OR
+dora run dora_teleoperate_dataflow.yml  # Needs both leader + follower
+
+# Terminal 2: Run inference
+bash scripts/run_so101_inference.sh ~/dataset ~/model "Pick apple"
+```
+
+### Changes
+- Removed DORA startup logic from inference.sh
+- Script now only runs Python command
+- Added clear usage instructions in script header
+- Accepts task description as 3rd argument
+
+---
+
 ## v0.2.106 (2025-12-10) - Tar-based Upload for 3-4x Faster Transfer
 
 ### Summary
