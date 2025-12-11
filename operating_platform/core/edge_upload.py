@@ -367,6 +367,188 @@ class EdgeUploader:
 
         return cmd
 
+    def _create_tar_archive(
+        self,
+        local_path: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Optional[str]:
+        """
+        Create a tar archive of the dataset directory.
+
+        Tar transfer is ~3-4x faster than rsync for many small files because:
+        - Single TCP stream (no per-file overhead)
+        - Sequential disk reads (better I/O throughput)
+        - No per-file checksum/metadata comparison
+
+        Args:
+            local_path: Path to dataset directory
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Path to created tar file, or None if failed
+        """
+        import shutil
+
+        local_path = Path(local_path)
+        if not local_path.exists():
+            log(f"Dataset path not found: {local_path}")
+            return None
+
+        # Create tar in /tmp to avoid filling dataset storage
+        tar_name = f"{local_path.name}.tar"
+        tar_path = Path("/tmp") / tar_name
+
+        # Remove existing tar if present
+        if tar_path.exists():
+            tar_path.unlink()
+
+        log(f"Creating tar archive: {tar_path}")
+        if progress_callback:
+            progress_callback("Creating tar archive...")
+
+        start_time = time.time()
+
+        try:
+            # Use subprocess for progress visibility
+            # tar cf (no compression - PNG is already compressed)
+            cmd = [
+                "tar", "cf", str(tar_path),
+                "-C", str(local_path.parent),  # Change to parent dir
+                local_path.name  # Archive just the dataset folder
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 min timeout for large datasets
+            )
+
+            if result.returncode != 0:
+                log(f"Tar creation failed: {result.stderr}")
+                return None
+
+            elapsed = time.time() - start_time
+            tar_size_mb = tar_path.stat().st_size / (1024 * 1024)
+            log(f"Tar created: {tar_size_mb:.1f} MB in {elapsed:.1f}s")
+
+            if progress_callback:
+                progress_callback(f"Tar created: {tar_size_mb:.1f} MB")
+
+            return str(tar_path)
+
+        except subprocess.TimeoutExpired:
+            log("Tar creation timeout (>10 min)")
+            return None
+        except Exception as e:
+            log(f"Tar creation error: {e}")
+            return None
+
+    def _upload_tar_file(
+        self,
+        tar_path: str,
+        remote_path: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> bool:
+        """
+        Upload a single tar file via SFTP (much faster than many small files).
+
+        Args:
+            tar_path: Path to local tar file
+            remote_path: Remote directory to upload to (tar file name appended)
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            True if upload successful
+        """
+        tar_file = Path(tar_path)
+        tar_size = tar_file.stat().st_size
+        tar_size_mb = tar_size / (1024 * 1024)
+        remote_tar_path = f"{remote_path}/{tar_file.name}"
+
+        log(f"Uploading tar file ({tar_size_mb:.1f} MB)...")
+        log(f"  Local: {tar_path}")
+        log(f"  Remote: {remote_tar_path}")
+
+        if progress_callback:
+            progress_callback(f"Uploading {tar_size_mb:.1f} MB...")
+
+        start_time = time.time()
+
+        if self._use_paramiko():
+            # Use SFTP for single file upload
+            try:
+                sftp = self._get_sftp()
+
+                # Progress callback for SFTP
+                bytes_transferred = [0]
+                last_progress = [0]
+
+                def sftp_progress(transferred: int, total: int):
+                    bytes_transferred[0] = transferred
+                    percent = int(100 * transferred / total)
+                    if percent >= last_progress[0] + 5:  # Update every 5%
+                        last_progress[0] = percent
+                        speed_mbps = (transferred / (1024*1024)) / max(time.time() - start_time, 0.1)
+                        if progress_callback:
+                            progress_callback(f"{percent}% ({speed_mbps:.1f} MB/s)")
+
+                sftp.put(tar_path, remote_tar_path, callback=sftp_progress)
+
+                elapsed = time.time() - start_time
+                speed_mbps = tar_size_mb / max(elapsed, 0.1)
+                log(f"Tar upload completed: {tar_size_mb:.1f} MB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+
+                if progress_callback:
+                    progress_callback(f"Upload complete ({speed_mbps:.1f} MB/s)")
+
+                return True
+
+            except Exception as e:
+                log(f"SFTP tar upload failed: {e}")
+                return False
+        else:
+            # Use rsync for single file
+            ssh_opts = f"ssh -p {self.config.port}"
+            ssh_opts += " -o StrictHostKeyChecking=no"
+            ssh_opts += " -o UserKnownHostsFile=/dev/null"
+
+            if self.config.ssh_key:
+                key_path = os.path.expanduser(self.config.ssh_key)
+                if os.path.exists(key_path):
+                    ssh_opts += f" -i {key_path}"
+
+            cmd = [
+                "rsync", "-avz", "--progress",
+                "-e", ssh_opts,
+                tar_path,
+                f"{self.config.user}@{self.config.host}:{remote_tar_path}"
+            ]
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,  # 30 min for large files
+                )
+
+                if result.returncode == 0:
+                    elapsed = time.time() - start_time
+                    speed_mbps = tar_size_mb / max(elapsed, 0.1)
+                    log(f"Tar upload completed: {tar_size_mb:.1f} MB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+                    return True
+                else:
+                    log(f"Rsync tar upload failed: {result.stderr}")
+                    return False
+
+            except subprocess.TimeoutExpired:
+                log("Tar upload timeout (>30 min)")
+                return False
+            except Exception as e:
+                log(f"Rsync tar upload error: {e}")
+                return False
+
     def create_remote_directory(self, subpath: str = "") -> bool:
         """Create directory on edge server"""
         remote_path = self.config.remote_path
@@ -530,14 +712,25 @@ class EdgeUploader:
         local_path: str,
         repo_id: str,
         progress_callback: Optional[Callable[[str], None]] = None,
+        use_tar: bool = True,
     ) -> bool:
         """
-        Sync dataset to edge server using SFTP (password) or rsync (key).
+        Sync dataset to edge server using tar archive (fast) or direct SFTP/rsync.
+
+        Tar mode (default): ~3-4x faster for many small files
+        - Creates tar archive locally
+        - Uploads single tar file (efficient TCP stream)
+        - Edge server extracts tar on receive
+
+        Direct mode (use_tar=False): Legacy per-file upload
+        - Slower due to per-file SSH overhead
+        - Use if tar extraction fails on edge server
 
         Args:
             local_path: Local dataset path
             repo_id: Dataset repository ID (used as subdirectory on edge)
             progress_callback: Optional callback for progress updates
+            use_tar: Use tar-based transfer (default True, much faster)
 
         Returns:
             True if sync successful
@@ -549,12 +742,52 @@ class EdgeUploader:
         # Get full upload path with username isolation
         upload_path = self.config.get_upload_path(repo_id)
         upload_subpath = f"{self.config.api_username}/{repo_id}"
+        # Parent path for tar upload (one level up from repo_id)
+        upload_parent_path = f"{self.config.remote_path}/{self.config.api_username}"
 
         log(f"Syncing dataset to edge server...")
         log(f"  Local: {local_path}")
         log(f"  Remote: {self.config.user}@{self.config.host}:{upload_path}/")
         log(f"  User: {self.config.api_username}")
+        log(f"  Mode: {'TAR (fast)' if use_tar else 'Direct SFTP/rsync'}")
 
+        start_time = time.time()
+
+        # TAR MODE: Create tar archive and upload single file
+        if use_tar:
+            # Create parent directory on remote (for tar file)
+            if not self.create_remote_directory(self.config.api_username):
+                log("Failed to create remote parent directory")
+                return False
+
+            # Step 1: Create tar archive locally
+            log("Step 1/3: Creating tar archive...")
+            tar_path = self._create_tar_archive(local_path, progress_callback)
+            if not tar_path:
+                log("Tar creation failed, falling back to direct upload")
+                use_tar = False
+            else:
+                # Step 2: Upload tar file
+                log("Step 2/3: Uploading tar file...")
+                upload_success = self._upload_tar_file(tar_path, upload_parent_path, progress_callback)
+
+                # Step 3: Clean up local tar file
+                log("Step 3/3: Cleaning up local tar file...")
+                try:
+                    Path(tar_path).unlink()
+                    log(f"Deleted local tar: {tar_path}")
+                except Exception as e:
+                    log(f"Warning: Failed to delete local tar: {e}")
+
+                if upload_success:
+                    elapsed = time.time() - start_time
+                    log(f"Tar sync completed in {elapsed:.1f}s")
+                    return True
+                else:
+                    log("Tar upload failed")
+                    return False
+
+        # DIRECT MODE: Upload files individually (fallback or explicit)
         # Create remote directory (includes username subdirectory)
         if not self.create_remote_directory(upload_subpath):
             return False
@@ -563,7 +796,6 @@ class EdgeUploader:
         if not self.clear_remote_directory(upload_subpath):
             log("Warning: Failed to clear remote directory, continuing with upload...")
 
-        start_time = time.time()
         remote_path = upload_path
 
         # Use SFTP if password authentication (paramiko)
@@ -624,25 +856,44 @@ class EdgeUploader:
             log(f"Sync error: {e}")
             return False
 
-    def notify_upload_complete(self, repo_id: str) -> bool:
+    def notify_upload_complete(self, repo_id: str, is_tar: bool = True) -> bool:
         """
         Notify edge server that upload is complete.
         This triggers encoding and cloud upload.
 
+        Args:
+            repo_id: Dataset repository ID
+            is_tar: Whether upload is a tar file (default True for tar mode)
+
         Note:
-            Dataset path sent to API is: {remote_path}/{api_username}/{repo_id}
+            For tar mode: Edge server extracts {remote_path}/{api_username}/{repo_id}.tar
+            For direct mode: Dataset path is {remote_path}/{api_username}/{repo_id}/
             Cloud credentials are passed so edge server can upload to cloud training server.
         """
-        upload_path = self.config.get_upload_path(repo_id)
-        log(f"Notifying edge server: upload complete for {repo_id}")
-        log(f"  Dataset path: {upload_path}")
+        if is_tar:
+            # Tar file path: {remote_path}/{api_username}/{repo_id}.tar
+            tar_path = f"{self.config.remote_path}/{self.config.api_username}/{repo_id}.tar"
+            dataset_path = self.config.get_upload_path(repo_id)  # Where to extract to
+            log(f"Notifying edge server: tar upload complete for {repo_id}")
+            log(f"  Tar file: {tar_path}")
+            log(f"  Extract to: {dataset_path}")
+        else:
+            dataset_path = self.config.get_upload_path(repo_id)
+            tar_path = None
+            log(f"Notifying edge server: upload complete for {repo_id}")
+            log(f"  Dataset path: {dataset_path}")
 
         # Build request payload with cloud credentials for edge server to use
         payload = {
             "repo_id": repo_id,
-            "dataset_path": upload_path,
+            "dataset_path": dataset_path,
             "username": self.config.api_username,
+            "is_tar": is_tar,  # Tell edge server to extract tar
         }
+
+        # Add tar file path if tar mode
+        if is_tar and tar_path:
+            payload["tar_path"] = tar_path
 
         # Add cloud credentials if available (for edge server to forward to cloud)
         if self.config.api_password:
@@ -654,7 +905,7 @@ class EdgeUploader:
             response = requests.post(
                 f"{self.config.api_url}/edge/upload-complete",
                 json=payload,
-                timeout=30,
+                timeout=60,  # Increased timeout for tar extraction
             )
 
             if response.status_code == 200:

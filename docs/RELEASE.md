@@ -4,6 +4,39 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.106 (2025-12-10) - Tar-based Upload for 3-4x Faster Transfer
+
+### Summary
+Implemented tar-based upload mode for edge uploads. Instead of rsyncing ~27,000 PNG files
+individually, the client now creates a tar archive, uploads a single file, and the edge
+server extracts it. This reduces upload time from ~60 minutes to ~15-20 minutes for 24GB.
+
+### Performance
+| Metric | Before (rsync) | After (tar) |
+|--------|----------------|-------------|
+| Upload time (24GB) | ~60 min | ~15-20 min |
+| Speedup | - | 3-4x faster |
+
+### Changes
+
+**edge_upload.py:**
+- `_create_tar_archive()`: Creates tar of dataset in /tmp (no compression, PNG already compressed)
+- `_upload_tar_file()`: Uploads single tar via SFTP with progress callback
+- `sync_dataset()`: Added `use_tar=True` parameter (default), falls back to direct mode if tar fails
+- `notify_upload_complete()`: Added `is_tar` and `tar_path` fields to API request
+
+### Flow
+1. Create tar: `tar cf /tmp/{repo_id}.tar -C {parent} {repo_id}`
+2. Upload single tar file via SFTP
+3. Delete local tar file
+4. Notify edge server with `is_tar=True`
+5. Edge extracts tar and continues with encoding
+
+### Requires
+- data-platform v2.0.44+ (for tar extraction on edge server)
+
+---
+
 ## v0.2.105 (2025-12-10) - Update Edge Upload Documentation
 
 ### Summary
