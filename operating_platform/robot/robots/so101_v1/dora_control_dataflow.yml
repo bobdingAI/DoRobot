@@ -64,9 +64,10 @@ nodes:
 
   - id: so101_zeromq
     path: dora_zeromq.py
-    inputs: 
+    inputs:
       image_top: camera_top/image
       image_wrist: camera_wrist/image
-      follower_joint: arm_so101_follower/joint
+      # Use same naming as teleoperate dataflow for manipulator compatibility
+      main_follower_joint: arm_so101_follower/joint
     outputs:
       - action_joint
