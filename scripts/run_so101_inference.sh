@@ -90,12 +90,44 @@ echo "Cameras:    top=$CAMERA_TOP_PATH, wrist=$CAMERA_WRIST_PATH"
 echo "Arm:        follower=$ARM_FOLLOWER_PORT"
 echo "=================================================="
 
-# Cleanup function
+# Cleanup function - proper device release order
 cleanup() {
     echo ""
-    echo "[INFO] Stopping DORA..."
+    echo "[INFO] Stopping DORA gracefully..."
+
+    # Step 1: Stop DORA dataflow - sends STOP events to nodes
     cd "$DORA_DIR" && dora stop "$DORA_GRAPH" 2>/dev/null || true
+
+    # Step 2: Send SIGTERM to camera/arm processes FIRST to release devices
+    echo "[INFO] Signaling camera processes to release video devices..."
+    pkill -SIGTERM -f "camera_opencv/main.py" 2>/dev/null || true
+
+    echo "[INFO] Signaling arm processes to release serial ports..."
+    pkill -SIGTERM -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+
+    # Wait for processes to handle SIGTERM and release devices
+    echo "[INFO] Waiting for device release (2s)..."
+    sleep 2
+
+    # Step 3: Destroy DORA graph
+    dora destroy "$DORA_GRAPH" 2>/dev/null || true
+    sleep 1
+
+    # Step 4: Kill DORA process if still running
+    if [ -n "$DORA_PID" ] && kill -0 $DORA_PID 2>/dev/null; then
+        echo "[INFO] Stopping DORA process..."
+        kill -TERM $DORA_PID 2>/dev/null || true
+        sleep 1
+        kill -9 $DORA_PID 2>/dev/null || true
+    fi
+
+    # Step 5: Force kill any remaining camera/arm processes
+    pkill -9 -f "camera_opencv/main.py" 2>/dev/null || true
+    pkill -9 -f "arm_normal_so101_v1/main.py" 2>/dev/null || true
+
+    # Step 6: Clean up IPC files
     rm -f /tmp/dora-zeromq-so101-* 2>/dev/null || true
+
     echo "[INFO] Cleanup complete"
 }
 trap cleanup EXIT INT TERM
