@@ -4,6 +4,103 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.111 (2025-12-12) - Auto-detect Inference Mode (Skip Leader Arm Check)
+
+### Summary
+Modified `manipulator.py` to auto-detect inference mode and skip leader arm connection check.
+In inference mode (when running `dora_control_dataflow.yml`), only the follower arm is connected.
+The manipulator now detects this by checking if leader arm data arrives within 3 seconds.
+
+### Problem
+Running `bash scripts/run_so101_inference.sh` failed with:
+```
+TimeoutError: 连接超时，未满足的条件: 等待主臂关节角度超时: 未收到[main_leader]
+```
+Even though inference mode doesn't need a leader arm.
+
+### Solution
+In `connect()` method:
+1. Wait 3 seconds to see if any leader arm data arrives
+2. If no leader data → inference mode → skip leader arm check
+3. Only check cameras and follower arm connection
+
+### Changes
+
+**manipulator.py:**
+- Added leader arm detection with 3s timeout in `connect()`
+- Made leader arm condition check conditional on `has_leader_arm_data`
+- Fixed success printing logic to handle both modes correctly
+
+### Behavior
+```
+# Teleoperation mode (dora_teleoperate_dataflow.yml)
+[SO101] Leader arm data detected - teleoperation mode
+[连接成功] 所有设备已就绪:
+  - 摄像头: image_top, image_wrist
+  - 主臂关节角度: main_leader
+  - 从臂关节角度: main_follower
+
+# Inference mode (dora_control_dataflow.yml)
+[SO101] No leader arm data - inference mode (follower only)
+[连接成功] 所有设备已就绪:
+  - 摄像头: image_top, image_wrist
+  - 从臂关节角度: main_follower
+```
+
+---
+
+## v0.2.110 (2025-12-11) - Fix Joint Naming in dora_control_dataflow.yml
+
+### Summary
+Fixed joint naming mismatch in `dora_control_dataflow.yml` that caused follower arm not to be detected.
+
+### Problem
+Error: `未收到 [main_follower]; 已收到 []`
+
+### Root Cause
+- `dora_control_dataflow.yml` used `follower_joint` as the input key
+- `manipulator.py` checks if "main_follower" exists in received joint keys
+- Since "main_follower" is not a substring of "follower_joint", the check failed
+
+### Fix
+Changed `dora_control_dataflow.yml` to use `main_follower_joint` (matching teleoperate dataflow):
+```yaml
+inputs:
+  main_follower_joint: arm_so101_follower/joint  # Was: follower_joint
+```
+
+---
+
+## v0.2.109 (2025-12-11) - Add Device Config Loading to run_so101_inference.sh
+
+### Summary
+Added device config file loading to inference script, matching `run_so101.sh` behavior.
+
+### Changes
+- Load camera/USB port settings from `~/.dorobot_device.conf`
+- Config file search order: `~/.dorobot_device.conf` → `/etc/dorobot/device.conf` → `.device.conf`
+- Display loaded config file path in startup banner
+
+---
+
+## v0.2.108 (2025-12-11) - All-in-One Inference Launcher
+
+### Summary
+Combined DORA startup and inference into single command.
+
+### Usage
+```bash
+bash scripts/run_so101_inference.sh [DATASET_PATH] [MODEL_PATH] [SINGLE_TASK]
+```
+
+### Changes
+- Script now starts DORA in background
+- Waits 5s for DORA nodes to initialize
+- Runs inference Python command
+- Cleanup on exit (stops DORA, removes IPC files)
+
+---
+
 ## v0.2.107 (2025-12-11) - Simplify inference.sh for Two-Terminal Workflow
 
 ### Summary

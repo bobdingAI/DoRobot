@@ -355,6 +355,23 @@ class SO101Manipulator:
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
+        # Check if leader arm data is being sent (for inference mode, it's not)
+        # Wait 3 seconds to see if any leader arm data arrives
+        print("[SO101] Detecting available data streams...")
+        leader_arm_timeout = 3.0
+        leader_arm_start = time.perf_counter()
+        has_leader_arm_data = False
+        while time.perf_counter() - leader_arm_start < leader_arm_timeout:
+            if any(any(name in key for key in recv_joint) for name in self.leader_arms):
+                has_leader_arm_data = True
+                break
+            time.sleep(0.1)
+
+        if has_leader_arm_data:
+            print("[SO101] Leader arm data detected - teleoperation mode")
+        else:
+            print("[SO101] No leader arm data - inference mode (follower only)")
+
         # 定义所有需要等待的条件及其错误信息
         conditions = [
             (
@@ -365,20 +382,23 @@ class SO101Manipulator:
             (
                 lambda: all(
                     any(name in key for key in recv_joint)
-                    for name in self.leader_arms
-                ),
-                lambda: [name for name in self.leader_arms if not any(name in key for key in recv_joint)],
-                "等待主臂关节角度超时"
-            ),
-            (
-                lambda: all(
-                    any(name in key for key in recv_joint)
                     for name in self.follower_arms
                 ),
                 lambda: [name for name in self.follower_arms if not any(name in key for key in recv_joint)],
                 "等待从臂关节角度超时"
             ),
         ]
+
+        # Only check for leader arm if leader arm data is being sent
+        if has_leader_arm_data:
+            conditions.insert(1, (
+                lambda: all(
+                    any(name in key for key in recv_joint)
+                    for name in self.leader_arms
+                ),
+                lambda: [name for name in self.leader_arms if not any(name in key for key in recv_joint)],
+                "等待主臂关节角度超时"
+            ))
 
         # 跟踪每个条件是否已完成
         completed = [False] * len(conditions)
@@ -436,26 +456,23 @@ class SO101Manipulator:
         # ===== 新增成功打印逻辑 =====
         success_messages = []
         # 摄像头连接状态
-        if conditions[0][0]():
-            cam_received = [name for name in self.cameras 
-                        if name in recv_images and name not in self.connect_excluded_cameras]
+        cam_received = [name for name in self.cameras
+                    if name in recv_images and name not in self.connect_excluded_cameras]
+        if cam_received:
             success_messages.append(f"摄像头: {', '.join(cam_received)}")
 
-        # 主臂数据状态
-        arm_data_types = ["主臂关节角度",]
-        for i, data_type in enumerate(arm_data_types, 1):
-            if conditions[i][0]():
-                arm_received = [name for name in self.leader_arms 
-                            if any(name in key for key in (recv_joint,)[i-1])]
-                success_messages.append(f"{data_type}: {', '.join(arm_received)}")
-        
+        # 主臂数据状态 (only in teleoperation mode)
+        if has_leader_arm_data:
+            arm_received = [name for name in self.leader_arms
+                        if any(name in key for key in recv_joint)]
+            if arm_received:
+                success_messages.append(f"主臂关节角度: {', '.join(arm_received)}")
+
         # 从臂数据状态
-        arm_data_types = ["从臂关节角度",]
-        for i, data_type in enumerate(arm_data_types, 1):
-            if conditions[i][0]():
-                arm_received = [name for name in self.follower_arms 
-                            if any(name in key for key in (recv_joint,)[i-1])]
-                success_messages.append(f"{data_type}: {', '.join(arm_received)}")
+        arm_received = [name for name in self.follower_arms
+                    if any(name in key for key in recv_joint)]
+        if arm_received:
+            success_messages.append(f"从臂关节角度: {', '.join(arm_received)}")
         
         # 打印成功连接信息
         print("\n[连接成功] 所有设备已就绪:")
