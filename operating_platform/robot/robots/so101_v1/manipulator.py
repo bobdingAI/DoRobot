@@ -258,12 +258,12 @@ class SO101Manipulator:
 
         self.microphones = self.config.microphones
 
-        # Leader arms - may be empty in inference mode
+        # Leader arms - always configure (needed for send_action() in inference mode)
+        # Note: In inference mode, we skip waiting for leader arm DATA in connect(),
+        # but we still need the leader_arms config for action key matching
         self.leader_arms = {}
-        if self.config.leader_arms and "main" in self.config.leader_arms:
-            self.leader_arms['main_leader'] = self.config.leader_arms["main"]
-        # if self.config.leader_arms and "second" in self.config.leader_arms:
-        #     self.leader_arms['second_leader'] = self.config.leader_arms["second"]
+        self.leader_arms['main_leader'] = self.config.leader_arms["main"]
+        # self.leader_arms['second_leader'] = self.config.leader_arms["second"]
 
         # Follower arms - required
         self.follower_arms = {}
@@ -359,28 +359,23 @@ class SO101Manipulator:
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
-        # Check if leader arm is configured (empty in inference mode via --robot.leader_arms="{}")
-        if not self.leader_arms:
-            # No leader arms configured - inference mode
-            print("[SO101] No leader arms configured - inference mode (follower only)")
-            has_leader_arm_data = False
-        else:
-            # Leader arms configured - check if data is being sent
-            # Wait up to 3 seconds to see if any leader arm data arrives
-            print("[SO101] Detecting available data streams...")
-            leader_arm_timeout = 3.0
-            leader_arm_start = time.perf_counter()
-            has_leader_arm_data = False
-            while time.perf_counter() - leader_arm_start < leader_arm_timeout:
-                if any(any(name in key for key in recv_joint) for name in self.leader_arms):
-                    has_leader_arm_data = True
-                    break
-                time.sleep(0.1)
+        # Detect mode by checking if leader arm DATA is being sent
+        # In inference mode (dora_control_dataflow.yml), no leader arm is connected
+        # In teleoperation mode (dora_teleoperate_dataflow.yml), leader arm sends data
+        print("[SO101] Detecting available data streams...")
+        leader_arm_timeout = 3.0
+        leader_arm_start = time.perf_counter()
+        has_leader_arm_data = False
+        while time.perf_counter() - leader_arm_start < leader_arm_timeout:
+            if any(any(name in key for key in recv_joint) for name in self.leader_arms):
+                has_leader_arm_data = True
+                break
+            time.sleep(0.1)
 
-            if has_leader_arm_data:
-                print("[SO101] Leader arm data detected - teleoperation mode")
-            else:
-                print("[SO101] No leader arm data - inference mode (follower only)")
+        if has_leader_arm_data:
+            print("[SO101] Leader arm data detected - teleoperation mode")
+        else:
+            print("[SO101] No leader arm data - inference mode (follower only)")
 
         # 定义所有需要等待的条件及其错误信息
         conditions = [
