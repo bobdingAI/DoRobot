@@ -258,10 +258,14 @@ class SO101Manipulator:
 
         self.microphones = self.config.microphones
 
+        # Leader arms - may be empty in inference mode
         self.leader_arms = {}
-        self.leader_arms['main_leader'] = self.config.leader_arms["main"]
-        # self.leader_arms['second_leader'] = self.config.leader_arms["second"]
+        if self.config.leader_arms and "main" in self.config.leader_arms:
+            self.leader_arms['main_leader'] = self.config.leader_arms["main"]
+        # if self.config.leader_arms and "second" in self.config.leader_arms:
+        #     self.leader_arms['second_leader'] = self.config.leader_arms["second"]
 
+        # Follower arms - required
         self.follower_arms = {}
         self.follower_arms['main_follower'] = self.config.follower_arms["main"]
         # self.follower_arms['second_follower'] = self.config.follower_arms["second"]
@@ -355,22 +359,28 @@ class SO101Manipulator:
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
-        # Check if leader arm data is being sent (for inference mode, it's not)
-        # Wait 3 seconds to see if any leader arm data arrives
-        print("[SO101] Detecting available data streams...")
-        leader_arm_timeout = 3.0
-        leader_arm_start = time.perf_counter()
-        has_leader_arm_data = False
-        while time.perf_counter() - leader_arm_start < leader_arm_timeout:
-            if any(any(name in key for key in recv_joint) for name in self.leader_arms):
-                has_leader_arm_data = True
-                break
-            time.sleep(0.1)
-
-        if has_leader_arm_data:
-            print("[SO101] Leader arm data detected - teleoperation mode")
+        # Check if leader arm is configured (empty in inference mode via --robot.leader_arms="{}")
+        if not self.leader_arms:
+            # No leader arms configured - inference mode
+            print("[SO101] No leader arms configured - inference mode (follower only)")
+            has_leader_arm_data = False
         else:
-            print("[SO101] No leader arm data - inference mode (follower only)")
+            # Leader arms configured - check if data is being sent
+            # Wait up to 3 seconds to see if any leader arm data arrives
+            print("[SO101] Detecting available data streams...")
+            leader_arm_timeout = 3.0
+            leader_arm_start = time.perf_counter()
+            has_leader_arm_data = False
+            while time.perf_counter() - leader_arm_start < leader_arm_timeout:
+                if any(any(name in key for key in recv_joint) for name in self.leader_arms):
+                    has_leader_arm_data = True
+                    break
+                time.sleep(0.1)
+
+            if has_leader_arm_data:
+                print("[SO101] Leader arm data detected - teleoperation mode")
+            else:
+                print("[SO101] No leader arm data - inference mode (follower only)")
 
         # 定义所有需要等待的条件及其错误信息
         conditions = [
@@ -433,11 +443,15 @@ class SO101Manipulator:
                             completed[i] = True
                             continue
 
-                        # 计算已接收的项
-                        if i == 0:
+                        # 计算已接收的项 - use base_msg to determine type
+                        if "摄像头" in base_msg:
                             received = [name for name in self.cameras if name not in missing]
-                        else:
+                        elif "主臂" in base_msg:
+                            received = [name for name in self.leader_arms if name not in missing]
+                        elif "从臂" in base_msg:
                             received = [name for name in self.follower_arms if name not in missing]
+                        else:
+                            received = []
 
                         # 构造错误信息
                         msg = f"{base_msg}: 未收到 [{', '.join(missing)}]; 已收到 [{', '.join(received)}]"
@@ -446,6 +460,10 @@ class SO101Manipulator:
                 # 如果所有条件都已完成，break
                 if not failed_messages:
                     break
+                
+                # Debug info for keys present
+                if recv_joint:
+                    print(f"Debug - Current joint keys: {list(recv_joint.keys())}")
 
                 # 抛出超时异常
                 raise TimeoutError(f"连接超时，未满足的条件: {'; '.join(failed_messages)}")

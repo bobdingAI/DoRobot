@@ -4,6 +4,41 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.112 (2025-12-12) - Fix Inference Mode Leader Arm Handling
+
+### Summary
+Fixed multiple issues preventing inference mode from working without leader arm:
+
+1. **`__init__` KeyError**: Hardcoded `self.config.leader_arms["main"]` crashed when empty config passed
+2. **Error reporting bug**: Hardcoded `i == 1` assumed leader arms, wrong in inference mode
+3. **Skip 3s wait**: When `--robot.leader_arms="{}"` passed, skip the 3-second detection
+
+### Changes
+
+**manipulator.py:**
+- `__init__`: Check if `"main"` exists in leader_arms before accessing
+- `connect()`: If `self.leader_arms` is empty, skip 3-second detection wait
+- Error reporting: Use `base_msg` content to determine arm type instead of index
+
+### Usage
+```bash
+# run_so101_inference.sh now passes empty leader_arms
+python operating_platform/core/inference.py \
+    --robot.type=so101 \
+    --robot.leader_arms="{}" \
+    ...
+```
+
+### Expected Output
+```
+[SO101] No leader arms configured - inference mode (follower only)
+[连接成功] 所有设备已就绪:
+  - 摄像头: image_top, image_wrist
+  - 从臂关节角度: main_follower
+```
+
+---
+
 ## v0.2.111 (2025-12-12) - Auto-detect Inference Mode (Skip Leader Arm Check)
 
 ### Summary
