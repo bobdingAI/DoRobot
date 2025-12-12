@@ -128,6 +128,7 @@ echo ""
 
 python operating_platform/core/inference.py \
     --robot.type=so101 \
+    --robot.leader_arms="{}" \
     --inference.single_task="$SINGLE_TASK" \
     --inference.dataset.repo_id="$DATASET_PATH" \
     --policy.path="$MODEL_PATH"
