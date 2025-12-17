@@ -357,10 +357,19 @@ main() {
             # Debian/Ubuntu
             PKG_MANAGER="apt"
             log_info "Detected Debian/Ubuntu (apt)"
+            log_info "Updating package list..."
+            sudo apt update || {
+                log_warn "Could not update package list. Continuing anyway..."
+            }
             log_info "Installing speech-dispatcher for voice prompts..."
             sudo apt install -y speech-dispatcher || {
                 log_warn "Could not install speech-dispatcher automatically."
                 log_warn "Please run: sudo apt install speech-dispatcher"
+            }
+            log_info "Installing espeak-ng for Chinese TTS..."
+            sudo apt install -y espeak-ng espeak-ng-data-cmn || {
+                log_warn "Could not install espeak-ng automatically."
+                log_warn "Please run: sudo apt install espeak-ng espeak-ng-data-cmn"
             }
             log_info "Installing audio dependencies (portaudio, ffmpeg, alsa)..."
             sudo apt install -y portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 || {

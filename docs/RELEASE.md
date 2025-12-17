@@ -4,6 +4,20 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.117 (2025-12-17) - Update setup_env.sh for Audio Dependencies
+
+### Summary
+Added missing audio dependencies to setup_env.sh for Chinese TTS support.
+
+### Changes
+
+**scripts/setup_env.sh:**
+- Added `sudo apt update` before installing packages
+- Added `espeak-ng` and `espeak-ng-data-cmn` for Chinese TTS support
+- Improved installation order and error handling
+
+---
+
 ## v0.2.116 (2025-12-17) - Add Chinese TTS Voice Prompts
 
 ### Summary
