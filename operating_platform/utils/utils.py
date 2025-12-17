@@ -291,12 +291,13 @@ def say(text, blocking=False, lang="zh"):
     elif system == "Linux":
         # Linux: Use espeak-ng with Chinese support
         if lang == "zh":
-            # Try espeak-ng first (better Chinese support), fallback to spd-say
-            cmd = ["espeak-ng", "-v", "zh", text]
+            # Use "cmn" (Mandarin Chinese) - "zh" doesn't work properly
+            # Also slow down speech rate (-s 130) for better clarity
+            cmd = ["espeak-ng", "-v", "cmn", "-s", "130", text]
         else:
             cmd = ["spd-say", text]
-        if blocking and lang != "zh":
-            cmd.append("--wait")
+            if blocking:
+                cmd.append("--wait")
 
     elif system == "Windows":
         # Windows: PowerShell with SpeechSynthesizer (auto-detects Chinese)
@@ -314,20 +315,15 @@ def say(text, blocking=False, lang="zh"):
 
     try:
         if blocking:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL)
         else:
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW if system == "Windows" else 0)
+            subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
         # Fallback for Linux if espeak-ng not installed
         if system == "Linux" and lang == "zh":
-            logging.warning("espeak-ng not found, trying spd-say")
-            cmd = ["spd-say", text]
-            if blocking:
-                cmd.append("--wait")
-            if blocking:
-                subprocess.run(cmd, check=True)
-            else:
-                subprocess.Popen(cmd)
+            logging.warning("espeak-ng not found for Chinese TTS")
+    except Exception as e:
+        logging.warning(f"TTS failed: {e}")
 
 
 def log_say(text, play_sounds, blocking=False):

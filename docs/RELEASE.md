@@ -4,6 +4,29 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.119 (2025-12-17) - Fix Chinese TTS Voice on Linux
+
+### Summary
+Fixed Chinese text-to-speech not working properly on Linux - was reading Chinese characters in English instead of speaking Chinese.
+
+### Problem
+The `say()` function used `espeak-ng -v zh` which doesn't work correctly. It would spell out Chinese characters in English phonetics instead of speaking Mandarin.
+
+### Fix
+Changed voice code from `zh` to `cmn` (Mandarin Chinese):
+- `espeak-ng -v cmn` - correct voice code for Mandarin
+- Added `-s 130` to slow down speech rate for better clarity
+- Improved error handling with stderr suppression
+
+### Changes
+
+**utils/utils.py:**
+- Changed `espeak-ng -v zh` to `espeak-ng -v cmn -s 130`
+- Added `stderr=subprocess.DEVNULL` to suppress noise
+- Simplified error handling
+
+---
+
 ## v0.2.118 (2025-12-17) - Fix Memory Leak During Data Collection
 
 ### Summary
