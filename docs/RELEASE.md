@@ -4,6 +4,22 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.120 (2025-12-17) - Fix espeak-ng Package Name
+
+### Summary
+Fixed incorrect package name in setup_env.sh - `espeak-ng-data-cmn` doesn't exist.
+
+### Fix
+Changed from `espeak-ng espeak-ng-data-cmn` to `espeak-ng espeak-ng-data`.
+The Mandarin Chinese (cmn) voice is included in the standard `espeak-ng-data` package.
+
+### Changes
+
+**scripts/setup_env.sh:**
+- Changed package from `espeak-ng-data-cmn` to `espeak-ng-data`
+
+---
+
 ## v0.2.119 (2025-12-17) - Fix Chinese TTS Voice on Linux
 
 ### Summary

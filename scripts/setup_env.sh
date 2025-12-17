@@ -367,9 +367,10 @@ main() {
                 log_warn "Please run: sudo apt install speech-dispatcher"
             }
             log_info "Installing espeak-ng for Chinese TTS..."
-            sudo apt install -y espeak-ng espeak-ng-data-cmn || {
+            # Note: Chinese (Mandarin/cmn) voice is included in espeak-ng-data
+            sudo apt install -y espeak-ng espeak-ng-data || {
                 log_warn "Could not install espeak-ng automatically."
-                log_warn "Please run: sudo apt install espeak-ng espeak-ng-data-cmn"
+                log_warn "Please run: sudo apt install espeak-ng espeak-ng-data"
             }
             log_info "Installing audio dependencies (portaudio, ffmpeg, alsa)..."
             sudo apt install -y portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 || {
