@@ -119,7 +119,15 @@ class AsyncImageWriter:
     The optimal number of processes and threads depends on your computer capabilities.
     We advise to use 4 threads per camera with 0 processes. If the fps is not stable, try to increase or lower
     the number of threads. If it is still not stable, try to use 1 subprocess, or more.
+
+    MEMORY FIX (v0.2.123): Queue is now bounded to prevent memory growth when disk I/O
+    is slower than camera FPS. If queue is full, save_image() will block briefly.
     """
+
+    # Maximum images to queue before blocking. At 30 FPS with 2 cameras:
+    # - 200 images = ~3.3 seconds of buffer
+    # - ~176 MB memory (at 480x640x3 per image)
+    MAX_QUEUE_SIZE = 200
 
     def __init__(self, num_processes: int = 0, num_threads: int = 1):
         self.num_processes = num_processes
@@ -128,21 +136,22 @@ class AsyncImageWriter:
         self.threads = []
         self.processes = []
         self._stopped = False
+        self._queue_full_warning_count = 0
 
         if num_threads <= 0 and num_processes <= 0:
             raise ValueError("Number of threads and processes must be greater than zero.")
 
         if self.num_processes == 0:
-            # Use threading
-            self.queue = queue.Queue()
+            # Use threading with BOUNDED queue to prevent memory growth
+            self.queue = queue.Queue(maxsize=self.MAX_QUEUE_SIZE)
             for _ in range(self.num_threads):
                 t = threading.Thread(target=worker_thread_loop, args=(self.queue,))
                 t.daemon = True
                 t.start()
                 self.threads.append(t)
         else:
-            # Use multiprocessing
-            self.queue = multiprocessing.JoinableQueue()
+            # Use multiprocessing with BOUNDED queue
+            self.queue = multiprocessing.JoinableQueue(maxsize=self.MAX_QUEUE_SIZE)
             for _ in range(self.num_processes):
                 p = multiprocessing.Process(target=worker_process, args=(self.queue, self.num_threads))
                 p.daemon = True
@@ -150,9 +159,23 @@ class AsyncImageWriter:
                 self.processes.append(p)
 
     def save_image(self, image: torch.Tensor | np.ndarray | PIL.Image.Image, fpath: Path):
+        import logging
+
         if isinstance(image, torch.Tensor):
             # Convert tensor to numpy array to minimize main process time
             image = image.cpu().numpy()
+
+        # Check queue size and warn if getting full (disk I/O may be too slow)
+        queue_size = self.queue.qsize()
+        if queue_size > self.MAX_QUEUE_SIZE * 0.8:  # 80% full
+            self._queue_full_warning_count += 1
+            if self._queue_full_warning_count % 30 == 1:  # Log every ~1 second at 30 FPS
+                logging.warning(
+                    f"[ImageWriter] Queue {queue_size}/{self.MAX_QUEUE_SIZE} (80%+ full). "
+                    f"Disk I/O may be slower than camera FPS. Consider faster storage or lower FPS."
+                )
+
+        # This will block if queue is full, providing back-pressure
         self.queue.put((image, fpath))
 
     def wait_until_done(self):

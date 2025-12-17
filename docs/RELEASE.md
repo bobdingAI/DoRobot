@@ -4,6 +4,52 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.123 (2025-12-17) - Fix AsyncImageWriter Unbounded Queue Memory Leak
+
+### Summary
+Fixed critical memory leak in `AsyncImageWriter` - the image queue was unbounded, causing ~1GB/episode memory growth when disk I/O is slower than camera FPS.
+
+### Problem
+```python
+# OLD CODE (unbounded queue - memory leak!)
+self.queue = queue.Queue()
+
+# At 30 FPS × 2 cameras = 60 images/second
+# Each image: 480×640×3 = 0.88 MB
+# 20-second episode = 1200 images = 1.05 GB if queue doesn't drain!
+```
+
+Meanwhile `AsyncAudioWriter` already had a bounded queue:
+```python
+q = queue.Queue(maxsize=100)  # Audio was safe
+```
+
+### Fix
+Changed to bounded queue with back-pressure:
+```python
+MAX_QUEUE_SIZE = 200  # ~176 MB max, ~3.3 seconds buffer
+
+# Now bounded - blocks when full instead of growing infinitely
+self.queue = queue.Queue(maxsize=self.MAX_QUEUE_SIZE)
+```
+
+Also added warning when queue is 80%+ full (indicates disk I/O is too slow).
+
+### Changes
+
+**dataset/image_writer.py:**
+- Added `MAX_QUEUE_SIZE = 200` class constant
+- Changed `Queue()` to `Queue(maxsize=MAX_QUEUE_SIZE)`
+- Added queue size monitoring with warnings
+- Updated both threading and multiprocessing paths
+
+### Expected Result
+- Memory capped at ~176 MB for image queue (vs unbounded growth before)
+- Combined with v0.2.122 PyArrow fix, memory should now be stable
+- Warning logs if disk I/O is too slow
+
+---
+
 ## v0.2.122 (2025-12-17) - Aggressive Memory Cleanup for Episode Saving
 
 ### Summary
