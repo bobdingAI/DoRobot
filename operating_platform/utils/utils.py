@@ -270,9 +270,80 @@ def capture_timestamp_utc():
     return datetime.now(timezone.utc)
 
 
+def _say_edge_tts(text, blocking=False, voice="zh-CN-XiaoxiaoNeural"):
+    """
+    Use edge-tts for natural-sounding Chinese TTS.
+    Requires: pip install edge-tts
+    Requires internet connection.
+    """
+    import tempfile
+    import shutil
+
+    # Check if edge-tts is available
+    try:
+        import edge_tts
+    except ImportError:
+        return False
+
+    # Check if we have a player available
+    player = None
+    for p in ["mpv", "ffplay", "aplay"]:
+        if shutil.which(p):
+            player = p
+            break
+
+    if not player:
+        return False
+
+    try:
+        # Generate audio to temp file
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            temp_path = f.name
+
+        # Use edge-tts CLI (simpler than async API)
+        gen_cmd = ["edge-tts", "--voice", voice, "--text", text, "--write-media", temp_path]
+        result = subprocess.run(gen_cmd, capture_output=True, timeout=10)
+
+        if result.returncode != 0:
+            os.unlink(temp_path)
+            return False
+
+        # Play the audio
+        if player == "mpv":
+            play_cmd = ["mpv", "--no-video", "--really-quiet", temp_path]
+        elif player == "ffplay":
+            play_cmd = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_path]
+        else:  # aplay - need to convert mp3 to wav first
+            os.unlink(temp_path)
+            return False  # aplay doesn't support mp3
+
+        if blocking:
+            subprocess.run(play_cmd, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            os.unlink(temp_path)
+        else:
+            # Non-blocking: spawn process and let it clean up
+            def play_and_cleanup():
+                subprocess.run(play_cmd, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+
+            import threading
+            t = threading.Thread(target=play_and_cleanup, daemon=True)
+            t.start()
+
+        return True
+    except Exception:
+        return False
+
+
 def say(text, blocking=False, lang="zh"):
     """
     Text-to-speech function with Chinese language support.
+
+    For natural Chinese speech, uses edge-tts (Microsoft neural TTS).
+    Falls back to espeak-ng if edge-tts is not available.
 
     Args:
         text: Text to speak
@@ -289,10 +360,12 @@ def say(text, blocking=False, lang="zh"):
             cmd = ["say", text]
 
     elif system == "Linux":
-        # Linux: Use espeak-ng with Chinese support
         if lang == "zh":
-            # Use "cmn" (Mandarin Chinese) - "zh" doesn't work properly
-            # Also slow down speech rate (-s 130) for better clarity
+            # Try edge-tts first for natural-sounding Chinese
+            # Voices: zh-CN-XiaoxiaoNeural (female), zh-CN-YunxiNeural (male)
+            if _say_edge_tts(text, blocking, voice="zh-CN-XiaoxiaoNeural"):
+                return
+            # Fallback to espeak-ng (robotic but works offline)
             cmd = ["espeak-ng", "-v", "cmn", "-s", "130", text]
         else:
             cmd = ["spd-say", text]
@@ -301,7 +374,6 @@ def say(text, blocking=False, lang="zh"):
 
     elif system == "Windows":
         # Windows: PowerShell with SpeechSynthesizer (auto-detects Chinese)
-        # Escape single quotes in text for PowerShell
         escaped_text = text.replace("'", "''")
         cmd = [
             "PowerShell",
@@ -319,7 +391,6 @@ def say(text, blocking=False, lang="zh"):
         else:
             subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
-        # Fallback for Linux if espeak-ng not installed
         if system == "Linux" and lang == "zh":
             logging.warning("espeak-ng not found for Chinese TTS")
     except Exception as e:

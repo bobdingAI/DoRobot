@@ -372,10 +372,14 @@ main() {
                 log_warn "Could not install espeak-ng automatically."
                 log_warn "Please run: sudo apt install espeak-ng espeak-ng-data"
             }
-            log_info "Installing audio dependencies (portaudio, ffmpeg, alsa)..."
-            sudo apt install -y portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 || {
+            log_info "Installing audio dependencies (portaudio, ffmpeg, alsa, mpv)..."
+            sudo apt install -y portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 mpv || {
                 log_warn "Could not install audio dependencies automatically."
-                log_warn "Please run: sudo apt install portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2"
+                log_warn "Please run: sudo apt install portaudio19-dev ffmpeg alsa-utils libasound2-dev libportaudio2 mpv"
+            }
+            log_info "Installing edge-tts for natural Chinese TTS..."
+            pip install edge-tts || {
+                log_warn "Could not install edge-tts. Natural Chinese TTS will not be available."
             }
         elif command -v dnf &> /dev/null; then
             # OpenEuler/Fedora/RHEL 8+

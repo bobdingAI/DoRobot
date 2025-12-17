@@ -4,6 +4,45 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.121 (2025-12-17) - Natural Chinese TTS with edge-tts
+
+### Summary
+Added natural-sounding Chinese TTS using Microsoft Edge neural voices.
+espeak-ng sounds robotic; edge-tts sounds like a native speaker.
+
+### How It Works
+1. First tries edge-tts (natural, requires internet)
+2. Falls back to espeak-ng (robotic, works offline)
+
+### Chinese Voices Available
+- `zh-CN-XiaoxiaoNeural` (female, default)
+- `zh-CN-YunxiNeural` (male)
+
+### Changes
+
+**utils/utils.py:**
+- Added `_say_edge_tts()` function for neural TTS
+- `say()` now tries edge-tts first, falls back to espeak-ng
+
+**scripts/setup_env.sh:**
+- Added `mpv` to apt dependencies (audio player)
+- Added `pip install edge-tts` for neural TTS
+
+### Requirements
+```bash
+# System packages
+sudo apt install mpv
+
+# Python package
+pip install edge-tts
+
+# Test it
+edge-tts --voice zh-CN-XiaoxiaoNeural --text "准备就绪" --write-media test.mp3
+mpv test.mp3
+```
+
+---
+
 ## v0.2.120 (2025-12-17) - Fix espeak-ng Package Name
 
 ### Summary
