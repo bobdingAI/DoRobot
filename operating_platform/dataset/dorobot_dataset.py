@@ -1111,11 +1111,23 @@ class DoRobotDataset(torch.utils.data.Dataset):
         episode_dict = {key: episode_buffer[key] for key in self.hf_features}
         ep_dataset = datasets.Dataset.from_dict(episode_dict, features=self.hf_features, split="train")
         ep_dataset = embed_images(ep_dataset)
-        self.hf_dataset = concatenate_datasets([self.hf_dataset, ep_dataset])
-        self.hf_dataset.set_transform(hf_transform_to_torch)
+
+        # MEMORY FIX: Don't accumulate episodes in memory during recording.
+        # Each episode is written to its own parquet file. Keeping all episodes
+        # in hf_dataset causes OOM after ~15-20 episodes.
+        # The hf_dataset will be reloaded from disk when needed for training.
+        # We only keep a minimal empty dataset structure for compatibility.
+        #
+        # Old code (causes OOM):
+        # self.hf_dataset = concatenate_datasets([self.hf_dataset, ep_dataset])
+        # self.hf_dataset.set_transform(hf_transform_to_torch)
+
         ep_data_path = self.root / self.meta.get_data_file_path(ep_index=episode_index)
         ep_data_path.parent.mkdir(parents=True, exist_ok=True)
         ep_dataset.to_parquet(ep_data_path)
+
+        # Explicitly delete the temporary dataset to free memory immediately
+        del ep_dataset
 
     def clear_episode_buffer(self) -> None:
         episode_index = self.episode_buffer["episode_index"]

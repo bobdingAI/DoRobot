@@ -4,6 +4,44 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.118 (2025-12-17) - Fix Memory Leak During Data Collection
+
+### Summary
+Fixed critical memory leak that caused OOM (Out of Memory) crash after collecting 15-20 episodes.
+
+### Problem
+During data collection, the system would crash with OOM after ~16-17 episodes. Linux OOM killer would terminate the process:
+```
+Killed
+```
+DORA daemon event handling times increased dramatically (100ms → 5000ms+) as memory filled up.
+
+### Root Cause
+In `_save_episode_table()`, each episode was concatenated into `hf_dataset` using:
+```python
+self.hf_dataset = concatenate_datasets([self.hf_dataset, ep_dataset])
+```
+This accumulated ALL episode data in memory, causing ~50-100MB per episode memory growth.
+
+### Fix
+Modified `_save_episode_table()` to only write parquet files without keeping episodes in memory:
+- Episode data is now written directly to parquet and immediately freed
+- Removed memory-accumulating `concatenate_datasets()` call
+- Added explicit `del ep_dataset` for immediate memory release
+
+### Changes
+
+**dataset/dorobot_dataset.py:**
+- `_save_episode_table()`: Removed `concatenate_datasets()` call that accumulated all episodes in memory
+- Each episode now writes to parquet file and releases memory immediately
+- Added comment explaining the memory-efficient approach
+
+### Impact
+- Data collection can now run indefinitely without memory growth
+- Memory usage stays constant regardless of number of episodes recorded
+
+---
+
 ## v0.2.117 (2025-12-17) - Update setup_env.sh for Audio Dependencies
 
 ### Summary
