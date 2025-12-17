@@ -1108,6 +1108,8 @@ class DoRobotDataset(torch.utils.data.Dataset):
         logging.info(f"[Dataset] Episode {ep_idx} removed")
 
     def _save_episode_table(self, episode_buffer: dict, episode_index: int) -> None:
+        import gc
+
         episode_dict = {key: episode_buffer[key] for key in self.hf_features}
         ep_dataset = datasets.Dataset.from_dict(episode_dict, features=self.hf_features, split="train")
         ep_dataset = embed_images(ep_dataset)
@@ -1126,8 +1128,21 @@ class DoRobotDataset(torch.utils.data.Dataset):
         ep_data_path.parent.mkdir(parents=True, exist_ok=True)
         ep_dataset.to_parquet(ep_data_path)
 
-        # Explicitly delete the temporary dataset to free memory immediately
+        # MEMORY FIX: Aggressive cleanup to prevent memory accumulation
+        # 1. Delete the dataset object
         del ep_dataset
+        del episode_dict
+
+        # 2. Force Python garbage collection
+        gc.collect()
+
+        # 3. Try to release PyArrow memory pool (if available)
+        try:
+            import pyarrow as pa
+            pool = pa.default_memory_pool()
+            pool.release_unused()
+        except Exception:
+            pass
 
     def clear_episode_buffer(self) -> None:
         episode_index = self.episode_buffer["episode_index"]

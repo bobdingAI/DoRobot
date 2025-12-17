@@ -4,6 +4,51 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.122 (2025-12-17) - Aggressive Memory Cleanup for Episode Saving
+
+### Summary
+Fixed memory growth issue during data collection. Memory was growing ~1GB per episode, causing OOM at ~16-17 episodes even after the initial fix in v0.2.118.
+
+### Problem
+After the v0.2.118 fix (removing concatenate_datasets), memory was still growing at ~1GB per episode:
+- Episode 10: 45% memory (16GB system)
+- Episode 16: 66% memory
+
+Root cause: PyArrow and HuggingFace datasets library retain memory in internal pools even after objects are deleted. Python's garbage collector alone doesn't release this memory back to the OS.
+
+### Fix
+Added aggressive memory cleanup in `_save_episode_table()`:
+1. Explicit `del` of dataset and dict objects
+2. Force `gc.collect()` after each episode save
+3. PyArrow memory pool release via `pool.release_unused()`
+
+### Changes
+
+**dataset/dorobot_dataset.py:**
+```python
+def _save_episode_table(self, episode_buffer: dict, episode_index: int) -> None:
+    import gc
+
+    # ... save parquet file ...
+
+    # MEMORY FIX: Aggressive cleanup
+    del ep_dataset
+    del episode_dict
+    gc.collect()
+
+    try:
+        import pyarrow as pa
+        pool = pa.default_memory_pool()
+        pool.release_unused()
+    except Exception:
+        pass
+```
+
+### Expected Result
+Memory should now stabilize after each episode instead of continuously growing. Some growth is expected for metadata, but it should be minimal (~10-50MB total, not 1GB per episode).
+
+---
+
 ## v0.2.121 (2025-12-17) - Natural Chinese TTS with edge-tts
 
 ### Summary
