@@ -396,11 +396,18 @@ main() {
                     log_warn "Please run: sudo dnf install speech-dispatcher"
                 }
             }
-            log_info "Installing portaudio for audio recording..."
-            sudo dnf install -y $DNF_OPTS portaudio-devel || {
-                sudo dnf install -y portaudio-devel || {
-                    log_warn "Could not install portaudio-devel automatically."
-                    log_warn "Please run: sudo dnf install portaudio-devel"
+            log_info "Installing espeak-ng for Chinese TTS..."
+            sudo dnf install -y $DNF_OPTS espeak-ng || {
+                sudo dnf install -y espeak-ng || {
+                    log_warn "Could not install espeak-ng automatically."
+                    log_warn "Please run: sudo dnf install espeak-ng"
+                }
+            }
+            log_info "Installing audio dependencies (portaudio, ffmpeg, alsa, mpv)..."
+            sudo dnf install -y $DNF_OPTS portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv || {
+                sudo dnf install -y portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv || {
+                    log_warn "Could not install audio dependencies automatically."
+                    log_warn "Please run: sudo dnf install portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv"
                 }
             }
             log_info "Installing additional development tools..."
@@ -409,6 +416,10 @@ main() {
                     log_warn "Could not install development tools automatically."
                     log_warn "Please run: sudo dnf install gcc gcc-c++ make"
                 }
+            }
+            log_info "Installing edge-tts for natural Chinese TTS..."
+            pip install edge-tts || {
+                log_warn "Could not install edge-tts. Natural Chinese TTS will not be available."
             }
         elif command -v yum &> /dev/null; then
             # CentOS/RHEL 7/older OpenEuler
@@ -423,11 +434,18 @@ main() {
                     log_warn "Please run: sudo yum install speech-dispatcher"
                 }
             }
-            log_info "Installing portaudio for audio recording..."
-            sudo yum install -y $YUM_OPTS portaudio-devel || {
-                sudo yum install -y portaudio-devel || {
-                    log_warn "Could not install portaudio-devel automatically."
-                    log_warn "Please run: sudo yum install portaudio-devel"
+            log_info "Installing espeak-ng for Chinese TTS..."
+            sudo yum install -y $YUM_OPTS espeak-ng || {
+                sudo yum install -y espeak-ng || {
+                    log_warn "Could not install espeak-ng automatically."
+                    log_warn "Please run: sudo yum install espeak-ng"
+                }
+            }
+            log_info "Installing audio dependencies (portaudio, ffmpeg, alsa, mpv)..."
+            sudo yum install -y $YUM_OPTS portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv || {
+                sudo yum install -y portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv || {
+                    log_warn "Could not install audio dependencies automatically."
+                    log_warn "Please run: sudo yum install portaudio-devel ffmpeg alsa-utils alsa-lib-devel mpv"
                 }
             }
             log_info "Installing additional development tools..."
@@ -436,6 +454,10 @@ main() {
                     log_warn "Could not install development tools automatically."
                     log_warn "Please run: sudo yum install gcc gcc-c++ make"
                 }
+            }
+            log_info "Installing edge-tts for natural Chinese TTS..."
+            pip install edge-tts || {
+                log_warn "Could not install edge-tts. Natural Chinese TTS will not be available."
             }
         else
             log_warn "Unknown package manager. Please install manually:"

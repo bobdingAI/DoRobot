@@ -4,6 +4,28 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.124 (2025-12-17) - Add Missing Dependencies for dnf/yum Package Managers
+
+### Summary
+Added missing TTS and audio dependencies for Fedora/RHEL/CentOS (dnf/yum) in setup_env.sh.
+Previously only Debian/Ubuntu (apt) had the full dependency list.
+
+### Added to dnf/yum sections
+- `espeak-ng` - Chinese TTS fallback
+- `ffmpeg` - Video encoding
+- `mpv` - Audio player for edge-tts
+- `alsa-utils` - Audio utilities
+- `alsa-lib-devel` - ALSA development library
+- `pip install edge-tts` - Natural Chinese TTS
+
+### Changes
+
+**scripts/setup_env.sh:**
+- dnf section: Added espeak-ng, ffmpeg, alsa-utils, alsa-lib-devel, mpv, edge-tts
+- yum section: Added espeak-ng, ffmpeg, alsa-utils, alsa-lib-devel, mpv, edge-tts
+
+---
+
 ## v0.2.123 (2025-12-17) - Fix AsyncImageWriter Unbounded Queue Memory Leak
 
 ### Summary
