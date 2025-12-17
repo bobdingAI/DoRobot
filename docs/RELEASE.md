@@ -4,6 +4,40 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.116 (2025-12-17) - Add Chinese TTS Voice Prompts
+
+### Summary
+Changed all audio prompts from English to Chinese for better user experience during data collection.
+
+### Changes
+
+**utils/utils.py:**
+- Updated `say()` function to support Chinese TTS:
+  - macOS: Uses `Ting-Ting` voice for Chinese
+  - Linux: Uses `espeak-ng` with Chinese support (fallback to spd-say)
+  - Windows: Auto-detects Chinese via SpeechSynthesizer
+- Added `lang` parameter (default "zh") for language selection
+- Added error handling with fallback for Linux
+
+**core/main.py:**
+- Translated all 37 `log_say()` prompts to Chinese, including:
+  - "准备就绪。按N键保存并开始下一集。" (Ready to start)
+  - "请重置环境。按P键继续。" (Reset environment)
+  - "采集结束。共采集X集。" (End collection)
+  - "训练完成。模型已下载。" (Training complete)
+  - Status messages for edge/cloud workflows
+
+**core/replay.py:**
+- Translated replay prompt to "正在回放录像"
+
+### Linux Setup
+```bash
+# Install Chinese TTS support
+sudo apt install espeak-ng espeak-ng-data-cmn
+```
+
+---
+
 ## v0.2.112 (2025-12-12) - Fix Inference Mode Leader Arm Handling
 
 ### Summary

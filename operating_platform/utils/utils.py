@@ -270,32 +270,64 @@ def capture_timestamp_utc():
     return datetime.now(timezone.utc)
 
 
-def say(text, blocking=False):
+def say(text, blocking=False, lang="zh"):
+    """
+    Text-to-speech function with Chinese language support.
+
+    Args:
+        text: Text to speak
+        blocking: If True, wait for speech to complete
+        lang: Language code ("zh" for Chinese, "en" for English)
+    """
     system = platform.system()
 
     if system == "Darwin":
-        cmd = ["say", text]
+        # macOS: Use Chinese voice Ting-Ting for zh, default for en
+        if lang == "zh":
+            cmd = ["say", "-v", "Ting-Ting", text]
+        else:
+            cmd = ["say", text]
 
     elif system == "Linux":
-        cmd = ["spd-say", text]
-        if blocking:
+        # Linux: Use espeak-ng with Chinese support
+        if lang == "zh":
+            # Try espeak-ng first (better Chinese support), fallback to spd-say
+            cmd = ["espeak-ng", "-v", "zh", text]
+        else:
+            cmd = ["spd-say", text]
+        if blocking and lang != "zh":
             cmd.append("--wait")
 
     elif system == "Windows":
+        # Windows: PowerShell with SpeechSynthesizer (auto-detects Chinese)
+        # Escape single quotes in text for PowerShell
+        escaped_text = text.replace("'", "''")
         cmd = [
             "PowerShell",
             "-Command",
             "Add-Type -AssemblyName System.Speech; "
-            f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')",
+            f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{escaped_text}')",
         ]
 
     else:
         raise RuntimeError("Unsupported operating system for text-to-speech.")
 
-    if blocking:
-        subprocess.run(cmd, check=True)
-    else:
-        subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW if system == "Windows" else 0)
+    try:
+        if blocking:
+            subprocess.run(cmd, check=True)
+        else:
+            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW if system == "Windows" else 0)
+    except FileNotFoundError:
+        # Fallback for Linux if espeak-ng not installed
+        if system == "Linux" and lang == "zh":
+            logging.warning("espeak-ng not found, trying spd-say")
+            cmd = ["spd-say", text]
+            if blocking:
+                cmd.append("--wait")
+            if blocking:
+                subprocess.run(cmd, check=True)
+            else:
+                subprocess.Popen(cmd)
 
 
 def log_say(text, play_sounds, blocking=False):

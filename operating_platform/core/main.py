@@ -423,7 +423,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     record.start()
 
     # Voice prompt: ready to start
-    log_say("Ready to start. Press N to save and start next episode.", play_sounds=True)
+    log_say("准备就绪。按N键保存并开始下一集。", play_sounds=True)
 
     # 主循环：连续录制多个episodes
     while True:
@@ -480,7 +480,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 logging.info("*"*30)
 
                 # Voice prompt: reset environment
-                log_say("Reset environment. Press P to proceed.", play_sounds=True)
+                log_say("请重置环境。按P键继续。", play_sounds=True)
 
                 # Wait for 'p' to proceed (with timeout)
                 reset_start = time.time()
@@ -513,15 +513,15 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                         # Voice prompt based on offload mode
                         if offload_mode == OFFLOAD_EDGE:
-                            log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。正在上传到边缘服务器。", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_RAW:
-                            log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。正在上传到云端训练。", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_ENCODED:
-                            log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。正在编码并上传到云端。", play_sounds=True)
                         elif offload_mode == OFFLOAD_LOCAL_RAW:
-                            log_say(f"End collection. {total_episodes} episodes collected. Raw images saved locally.", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。原始图像已保存到本地。", play_sounds=True)
                         else:
-                            log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。请等待视频编码。", play_sounds=True)
 
                         # Close camera display
                         camera_display.close()
@@ -582,18 +582,18 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                     logging.info(f"Model downloaded to: {model_output_path}")
                                     logging.info("="*50)
                                     logging.info("Model download completed. Ready to run inference.")
-                                    log_say("Model download completed. Ready to run inference.", play_sounds=True)
+                                    log_say("模型下载完成。可以开始推理了。", play_sounds=True)
                                 else:
                                     logging.error("=" * 50)
                                     logging.error("EDGE WORKFLOW FAILED")
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
                                     logging.error("=" * 50)
-                                    log_say("Edge workflow failed. Local data saved.", play_sounds=True)
+                                    log_say("边缘工作流失败。本地数据已保存。", play_sounds=True)
                             except Exception as e:
                                 logging.error(f"Edge upload error: {e}")
                                 logging.error(f"Local data preserved at: {upload_dataset_path}")
                                 traceback.print_exc()
-                                log_say("Edge upload error. Local data saved.", play_sounds=True)
+                                log_say("边缘上传出错。本地数据已保存。", play_sounds=True)
 
                         elif offload_mode == OFFLOAD_CLOUD_RAW:
                             # Cloud raw mode - upload raw images to cloud for encoding
@@ -605,7 +605,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                 logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
                                 logging.warning(f"Local data preserved at: {upload_dataset_path}")
                                 logging.warning("=" * 50)
-                                log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                                log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
                             else:
                                 dorobot_home = Path.home() / "DoRobot"
                                 model_output_path = dorobot_home / "model"
@@ -622,17 +622,17 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                     )
                                     if success:
                                         logging.info("Cloud training completed!")
-                                        log_say("Training complete.", play_sounds=True)
+                                        log_say("训练完成。", play_sounds=True)
                                     else:
                                         logging.error("=" * 50)
                                         logging.error("CLOUD TRAINING FAILED")
                                         logging.error(f"Local data preserved at: {upload_dataset_path}")
                                         logging.error("=" * 50)
-                                        log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                        log_say("云端训练失败。本地数据已保存。", play_sounds=True)
                                 except Exception as e:
                                     logging.error(f"Cloud training error: {e}")
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                    log_say("Cloud training error. Local data saved.", play_sounds=True)
+                                    log_say("云端训练出错。本地数据已保存。", play_sounds=True)
 
                         elif offload_mode == OFFLOAD_CLOUD_ENCODED:
                             # Cloud encoded mode - local encoding done, upload encoded videos to cloud
@@ -644,7 +644,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                 logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
                                 logging.warning(f"Local data preserved at: {upload_dataset_path}")
                                 logging.warning("=" * 50)
-                                log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                                log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
                             else:
                                 dorobot_home = Path.home() / "DoRobot"
                                 model_output_path = dorobot_home / "model"
@@ -661,17 +661,17 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                     )
                                     if success:
                                         logging.info("Cloud training completed!")
-                                        log_say("Training complete. Model downloaded.", play_sounds=True)
+                                        log_say("训练完成。模型已下载。", play_sounds=True)
                                     else:
                                         logging.error("=" * 50)
                                         logging.error("CLOUD TRAINING FAILED")
                                         logging.error(f"Local data preserved at: {upload_dataset_path}")
                                         logging.error("=" * 50)
-                                        log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                        log_say("云端训练失败。本地数据已保存。", play_sounds=True)
                                 except Exception as e:
                                     logging.error(f"Cloud training error: {e}")
                                     logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                    log_say("Cloud training error. Local data saved.", play_sounds=True)
+                                    log_say("云端训练出错。本地数据已保存。", play_sounds=True)
 
                         elif offload_mode == OFFLOAD_LOCAL_RAW:
                             # Local raw mode - just save locally, no upload
@@ -681,7 +681,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                             logging.info("="*50)
                             logging.info("To upload and encode later, run:")
                             logging.info(f"  python scripts/edge_encode.py --dataset {upload_dataset_path}")
-                            log_say("Raw images saved locally.", play_sounds=True)
+                            log_say("原始图像已保存到本地。", play_sounds=True)
 
                         return
                 else:
@@ -689,7 +689,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                 # Voice prompt: recording new episode
                 next_episode = record.dataset.episode_buffer.get("episode_index", 0)
-                log_say(f"Recording episode {next_episode}.", play_sounds=True)
+                log_say(f"正在录制第{next_episode}集。", play_sounds=True)
 
                 break  # Break to restart episode loop
 
@@ -705,15 +705,15 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                 # Voice prompt based on offload mode
                 if offload_mode == OFFLOAD_EDGE:
-                    log_say(f"End collection. {total_episodes} episodes collected. Uploading to edge server.", play_sounds=True)
+                    log_say(f"采集结束。共采集{total_episodes}集。正在上传到边缘服务器。", play_sounds=True)
                 elif offload_mode == OFFLOAD_CLOUD_RAW:
-                    log_say(f"End collection. {total_episodes} episodes collected. Uploading to cloud for training.", play_sounds=True)
+                    log_say(f"采集结束。共采集{total_episodes}集。正在上传到云端训练。", play_sounds=True)
                 elif offload_mode == OFFLOAD_CLOUD_ENCODED:
-                    log_say(f"End collection. {total_episodes} episodes collected. Encoding then uploading to cloud.", play_sounds=True)
+                    log_say(f"采集结束。共采集{total_episodes}集。正在编码并上传到云端。", play_sounds=True)
                 elif offload_mode == OFFLOAD_LOCAL_RAW:
-                    log_say(f"End collection. {total_episodes} episodes collected. Raw images saved locally.", play_sounds=True)
+                    log_say(f"采集结束。共采集{total_episodes}集。原始图像已保存到本地。", play_sounds=True)
                 else:
-                    log_say(f"End collection. {total_episodes} episodes collected. Please wait for video encoding.", play_sounds=True)
+                    log_say(f"采集结束。共采集{total_episodes}集。请等待视频编码。", play_sounds=True)
 
                 # Close camera display window FIRST to release video resources
                 logging.info("Closing camera display...")
@@ -789,18 +789,18 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                             logging.info(f"Model downloaded to: {model_output_path}")
                             logging.info("="*50)
                             logging.info("Model download completed. Ready to run inference.")
-                            log_say("Model download completed. Ready to run inference.", play_sounds=True)
+                            log_say("模型下载完成。可以开始推理了。", play_sounds=True)
                         else:
                             logging.error("=" * 50)
                             logging.error("EDGE WORKFLOW FAILED")
                             logging.error(f"Local data preserved at: {upload_dataset_path}")
                             logging.error("=" * 50)
-                            log_say("Edge workflow failed. Local data saved.", play_sounds=True)
+                            log_say("边缘工作流失败。本地数据已保存。", play_sounds=True)
                     except Exception as e:
                         logging.error(f"Edge upload error: {e}")
                         logging.error(f"Local data preserved at: {upload_dataset_path}")
                         traceback.print_exc()
-                        log_say("Edge upload error. Local data saved.", play_sounds=True)
+                        log_say("边缘上传出错。本地数据已保存。", play_sounds=True)
 
                 elif offload_mode == OFFLOAD_CLOUD_RAW:
                     # Cloud raw mode - upload raw images to cloud for encoding
@@ -812,7 +812,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
                         logging.warning(f"Local data preserved at: {upload_dataset_path}")
                         logging.warning("=" * 50)
-                        log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                        log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
                     else:
                         # Model output path: sibling folder ~/DoRobot/model
                         dorobot_home = Path.home() / "DoRobot"
@@ -840,19 +840,19 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                 logging.info("CLOUD TRAINING COMPLETED SUCCESSFULLY!")
                                 logging.info(f"Model downloaded to: {model_output_path}")
                                 logging.info("="*50)
-                                log_say("Training complete. Model downloaded.", play_sounds=True)
+                                log_say("训练完成。模型已下载。", play_sounds=True)
                             else:
                                 logging.error("=" * 50)
                                 logging.error("CLOUD TRAINING FAILED")
                                 logging.error(f"Local data preserved at: {upload_dataset_path}")
                                 logging.error("=" * 50)
-                                log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                log_say("云端训练失败。本地数据已保存。", play_sounds=True)
 
                         except Exception as e:
                             logging.error(f"Cloud training error: {e}")
                             logging.error(f"Local data preserved at: {upload_dataset_path}")
                             traceback.print_exc()
-                            log_say("Cloud training error. Local data saved.", play_sounds=True)
+                            log_say("云端训练出错。本地数据已保存。", play_sounds=True)
 
                 elif offload_mode == OFFLOAD_CLOUD_ENCODED:
                     # Cloud encoded mode - local encoding done, upload encoded videos to cloud
@@ -864,7 +864,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
                         logging.warning(f"Local data preserved at: {upload_dataset_path}")
                         logging.warning("=" * 50)
-                        log_say("Cloud upload skipped. Local data saved.", play_sounds=True)
+                        log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
                     else:
                         # Model output path: sibling folder ~/DoRobot/model
                         dorobot_home = Path.home() / "DoRobot"
@@ -892,19 +892,19 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                 logging.info("CLOUD TRAINING COMPLETED SUCCESSFULLY!")
                                 logging.info(f"Model downloaded to: {model_output_path}")
                                 logging.info("="*50)
-                                log_say("Training complete. Model downloaded.", play_sounds=True)
+                                log_say("训练完成。模型已下载。", play_sounds=True)
                             else:
                                 logging.error("=" * 50)
                                 logging.error("CLOUD TRAINING FAILED")
                                 logging.error(f"Local data preserved at: {upload_dataset_path}")
                                 logging.error("=" * 50)
-                                log_say("Cloud training failed. Local data saved.", play_sounds=True)
+                                log_say("云端训练失败。本地数据已保存。", play_sounds=True)
 
                         except Exception as e:
                             logging.error(f"Cloud training error: {e}")
                             logging.error(f"Local data preserved at: {upload_dataset_path}")
                             traceback.print_exc()
-                            log_say("Cloud training error. Local data saved.", play_sounds=True)
+                            log_say("云端训练出错。本地数据已保存。", play_sounds=True)
 
                 elif offload_mode == OFFLOAD_LOCAL_RAW:
                     # Local raw mode - just save locally, no upload
@@ -914,7 +914,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     logging.info("="*50)
                     logging.info("To upload and encode later, run:")
                     logging.info(f"  python scripts/edge_encode.py --dataset {upload_dataset_path}")
-                    log_say("Raw images saved locally.", play_sounds=True)
+                    log_say("原始图像已保存到本地。", play_sounds=True)
 
                 return
 
