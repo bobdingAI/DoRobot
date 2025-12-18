@@ -719,15 +719,16 @@ class SO101Manipulator:
             )
 
         for name in self.leader_arms:
-            goal_joint = [ val for key, val in action.items() if name in key and "joint" in key]
-            # goal_gripper = [ val for key, val in action.items() if name in key and "gripper" in key]
+            # Filter action keys that belong to this arm (keys are like "main_leader_joint_shoulder_pan.pos")
+            goal_joint = [ val for key, val in action.items() if name in key and ".pos" in key]
 
-            # goal_joint = action[(arm_index*arm_action_dim+from_idx):(arm_index*arm_action_dim+to_idx)]
-            # goal_gripper = action[arm_index*arm_action_dim + 12]
-            # arm_index += 1
+            # Debug: warn if no action values found
+            if not goal_joint:
+                print(f"[SO101] WARNING: No action values found for arm '{name}'")
+                print(f"[SO101] Action keys: {list(action.keys())}")
+                continue
+
             goal_joint_numpy = np.array([t for t in goal_joint], dtype=np.float32)
-            # goal_gripper_numpy = np.array([t.item() for t in goal_gripper], dtype=np.float32)
-            # position = np.concatenate([goal_joint_numpy, goal_gripper_numpy], axis=0)
 
             so101_zmq_send(f"action_joint_{name}", goal_joint_numpy, wait_time_s=0.01)
 
