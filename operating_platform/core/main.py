@@ -51,7 +51,7 @@ _cloud_credentials = None
 
 # Memory monitoring settings
 # Default memory limit in GB (can be overridden by MEMORY_LIMIT_GB environment variable)
-DEFAULT_MEMORY_LIMIT_GB = 16.0
+DEFAULT_MEMORY_LIMIT_GB = 19.0
 # Memory check interval in frames (check every N frames, at 30 FPS this is ~3 seconds)
 MEMORY_CHECK_INTERVAL = 100
 
