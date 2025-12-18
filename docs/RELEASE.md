@@ -4,6 +4,41 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.130 (2025-12-18) - Add Direct Cloud Download Option
+
+### Summary
+Added `--download-only` option to `scripts/cloud_train.py` for direct cloud model download without going through edge server.
+
+### Problem
+`edge.sh --download-only` was failing because it tried to go through the edge server, which is unnecessary when you just want to download a trained model from cloud.
+
+### Solution
+Added `--download-only` to `scripts/cloud_train.py` which:
+1. Logs in directly to cloud API
+2. Gets the latest transaction status for the user
+3. Waits for training completion (if not already done)
+4. Downloads model directly via SFTP
+
+### Usage
+```bash
+# Download model from completed training
+python scripts/cloud_train.py --download-only -u gpu1 -p 'password'
+
+# With custom output path
+python scripts/cloud_train.py --download-only -u gpu1 -p 'password' -o ~/DoRobot/model
+```
+
+### Changes
+
+**operating_platform/core/cloud_train.py:**
+- Added `run_download_only()` function for download-only workflow
+
+**scripts/cloud_train.py:**
+- Added `--download-only` CLI argument
+- Added download-only mode handling in main()
+
+---
+
 ## v0.2.129 (2025-12-18) - Adjust Default Memory Limit to 19 GB
 
 ### Summary

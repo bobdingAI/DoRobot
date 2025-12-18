@@ -409,6 +409,105 @@ class CloudTrainer:
         self._close_ssh_client()
 
 
+def run_download_only(model_output_path: str,
+                      api_url: str = None, username: str = None, password: str = None,
+                      timeout_minutes: int = 60,
+                      status_callback=None) -> bool:
+    """
+    Download model from existing completed training (no upload).
+
+    Use this when training already completed but download failed, or to
+    re-download a previously trained model.
+
+    Args:
+        model_output_path: Local path to save downloaded model
+        api_url: API server URL
+        username: API username
+        password: API password
+        timeout_minutes: Timeout for waiting on training completion
+        status_callback: Optional callback(status, progress) for status updates
+
+    Returns:
+        True if model downloaded successfully
+    """
+    trainer = CloudTrainer(api_base_url=api_url, username=username, password=password)
+
+    try:
+        # Step 1: Login
+        if not trainer.login():
+            return False
+
+        # Step 2: Get latest transaction for this user
+        log("Getting latest transaction status...")
+        try:
+            response = requests.get(
+                f"{trainer.api_base_url}/transactions/latest",
+                headers={"Authorization": f"Bearer {trainer.token}"},
+                timeout=30
+            )
+
+            if response.status_code == 404:
+                log("No existing transactions found for this user")
+                return False
+
+            response.raise_for_status()
+            transaction_data = response.json()
+
+            trainer.transaction_id = transaction_data.get("transaction_id")
+            status = str(transaction_data.get("status", "UNKNOWN")).upper()
+            model_path = transaction_data.get("model_path")
+
+            log(f"Found transaction: {trainer.transaction_id}")
+            log(f"Status: {status}")
+
+            # Setup SSH info for download
+            if all(k in transaction_data for k in ["ssh_host", "ssh_username", "ssh_password", "ssh_port"]):
+                ssh_password = base64.b64decode(transaction_data["ssh_password"]).decode('utf-8')
+                trainer.ssh_info = {
+                    'host': transaction_data["ssh_host"],
+                    'username': transaction_data["ssh_username"],
+                    'password': ssh_password,
+                    'port': int(transaction_data["ssh_port"])
+                }
+            else:
+                log("SSH credentials not available in transaction")
+                return False
+
+        except requests.exceptions.HTTPError as e:
+            log(f"Failed to get transaction: {e}")
+            return False
+
+        # Step 3: Wait for completion if not already completed
+        if status != "COMPLETED":
+            log(f"Training not yet completed (status: {status}), waiting...")
+            success, model_path = trainer.poll_training_status(
+                timeout_minutes=timeout_minutes,
+                status_callback=status_callback
+            )
+            if not success or not model_path:
+                log("Training did not complete successfully")
+                return False
+        else:
+            log("Training already completed")
+            if not model_path:
+                log("ERROR: Training completed but no model path available")
+                return False
+
+        # Step 4: Download model
+        log(f"Downloading model from: {model_path}")
+        if not trainer.download_model(model_path, model_output_path):
+            return False
+
+        # Step 5: Modify config for local device
+        trainer.modify_config_device(model_output_path, to_device="npu")
+
+        log(f"Download complete! Model saved to: {model_output_path}")
+        return True
+
+    finally:
+        trainer.cleanup()
+
+
 def run_cloud_training(dataset_path: str, model_output_path: str,
                        api_url: str = None, username: str = None, password: str = None,
                        timeout_minutes: int = 60,
