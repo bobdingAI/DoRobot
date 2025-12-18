@@ -4,6 +4,16 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.129 (2025-12-18) - Adjust Default Memory Limit to 19 GB
+
+### Summary
+Increased default memory limit from 16 GB to 19 GB for better utilization on devices with more RAM.
+
+### Changes
+- `DEFAULT_MEMORY_LIMIT_GB` changed from 16.0 to 19.0
+
+---
+
 ## v0.2.128 (2025-12-18) - Revert Bounded Queue, Add Memory-Based Auto-Stop
 
 ### Summary
@@ -15,7 +25,7 @@ The bounded queue introduced in v0.2.123 caused recording loop blocking when dis
 ### Solution
 - Revert to unbounded queue to preserve v0.2.115 recording timing behavior
 - Add memory monitoring to auto-stop recording when memory limit reached
-- Configurable via `MEMORY_LIMIT_GB` environment variable (default: 16 GB)
+- Configurable via `MEMORY_LIMIT_GB` environment variable (default: 19 GB)
 
 ### Changes
 
@@ -25,7 +35,7 @@ The bounded queue introduced in v0.2.123 caused recording loop blocking when dis
 - Memory management delegated to recording loop auto-stop
 
 **operating_platform/core/main.py:**
-- Added `DEFAULT_MEMORY_LIMIT_GB = 16.0` constant
+- Added `DEFAULT_MEMORY_LIMIT_GB = 19.0` constant
 - Added `MEMORY_CHECK_INTERVAL = 100` (check every ~3 seconds at 30 FPS)
 - Added `get_memory_usage_gb()` using psutil (with resource fallback)
 - Added `get_memory_limit_gb()` to read from `MEMORY_LIMIT_GB` env var
@@ -34,7 +44,7 @@ The bounded queue introduced in v0.2.123 caused recording loop blocking when dis
 
 ### Usage
 ```bash
-# Default: 16 GB limit
+# Default: 19 GB limit
 bash scripts/run_so101.sh
 
 # Custom limit: 20 GB
