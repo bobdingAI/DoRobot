@@ -16,6 +16,7 @@ Options:
     --password PASS     API password (default: from env DOROBOT_PASSWORD or userb1234)
     --timeout MINUTES   Training timeout in minutes (default: 120)
     --list              List available datasets and exit
+    --download-only     Skip upload, just download model from existing training
 
 Examples:
     # Auto-detect latest dataset and train
@@ -26,6 +27,9 @@ Examples:
 
     # List available datasets
     python scripts/cloud_train.py --list
+
+    # Download model only (when training completed but download failed)
+    python scripts/cloud_train.py --download-only -u gpu1 -p 'password'
 
     # With custom API server
     DOROBOT_API_URL=http://192.168.0.12:8000 python scripts/cloud_train.py
@@ -43,7 +47,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from operating_platform.core.cloud_train import run_cloud_training, log
+from operating_platform.core.cloud_train import run_cloud_training, run_download_only, log
 
 
 def setup_logging():
@@ -206,6 +210,11 @@ def main():
         action="store_true",
         help="List available datasets and exit"
     )
+    parser.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Skip upload, just download model from existing training (for retry when download failed)"
+    )
 
     args = parser.parse_args()
 
@@ -215,6 +224,51 @@ def main():
     if args.list:
         list_datasets(default_base)
         return 0
+
+    # Download-only mode (no dataset required)
+    if args.download_only:
+        output_path = Path(args.output).expanduser().resolve()
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        print("\n" + "=" * 60)
+        print("  DoRobot Cloud Training - Download Only")
+        print("=" * 60)
+        print(f"  Output:     {output_path}")
+        print(f"  API URL:    {args.api_url}")
+        print(f"  Username:   {args.username}")
+        print(f"  Timeout:    {args.timeout} minutes")
+        print("=" * 60 + "\n")
+
+        try:
+            success = run_download_only(
+                model_output_path=str(output_path),
+                api_url=args.api_url,
+                username=args.username,
+                password=args.password,
+                timeout_minutes=args.timeout
+            )
+
+            if success:
+                print("\n" + "=" * 60)
+                print("  DOWNLOAD COMPLETED SUCCESSFULLY!")
+                print(f"  Model saved to: {output_path}")
+                print("=" * 60 + "\n")
+                return 0
+            else:
+                print("\n" + "=" * 60)
+                print("  DOWNLOAD FAILED")
+                print("  Check the logs above for details")
+                print("=" * 60 + "\n")
+                return 1
+
+        except KeyboardInterrupt:
+            print("\n\nDownload interrupted by user")
+            return 1
+        except Exception as e:
+            logging.error(f"Download error: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
 
     # Determine dataset path
     if args.dataset:
