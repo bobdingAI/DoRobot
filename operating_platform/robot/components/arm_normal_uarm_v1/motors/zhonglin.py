@@ -3,11 +3,22 @@ import time
 import re
 import numpy as np
 from typing import Dict, Any
-from .motors_bus import MotorsBus, Motor, MotorCalibration, MotorNormMode
+from .motors_bus import Motor, MotorCalibration, MotorNormMode
 
-class ZhonglinMotorsBus(MotorsBus):
-    """Driver for Zhonglin ASCII protocol servos."""
-    
+
+class ZhonglinMotorsBus:
+    """
+    Standalone driver for Zhonglin ASCII protocol servos.
+
+    This is a simplified implementation for leader arm use (read-only).
+    It does NOT inherit from MotorsBus to avoid abstract method requirements.
+    """
+
+    # Class attributes for compatibility
+    model_ctrl_table = {"zhonglin": {}}
+    model_number_table = {"zhonglin": 0}
+    model_resolution_table = {"zhonglin": 4096}
+
     def __init__(
         self,
         port: str,
@@ -15,14 +26,18 @@ class ZhonglinMotorsBus(MotorsBus):
         calibration: Dict[str, MotorCalibration] = None,
         baudrate: int = 115200,
     ):
-        super().__init__(port, motors, calibration)
+        self.port = port
+        self.motors = motors
+        self.calibration = calibration if calibration else {}
         self.baudrate = baudrate
         self.ser = None
         self.zero_angles = {name: 0.0 for name in motors}
+        self.is_connected = False
 
-    def connect(self):
+    def connect(self, handshake: bool = True):
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
+            self.is_connected = True
             print(f"[Zhonglin] Serial port {self.port} opened at {self.baudrate}")
             self._init_servos()
         except Exception as e:
@@ -33,6 +48,7 @@ class ZhonglinMotorsBus(MotorsBus):
         if self.ser:
             self.ser.close()
             self.ser = None
+            self.is_connected = False
             print(f"[Zhonglin] Serial port {self.port} closed")
 
     def send_command(self, cmd: str) -> str:

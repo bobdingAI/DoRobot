@@ -10,25 +10,31 @@ from piper_sdk import C_PiperInterface
 
 
 def enable_fun(piper: C_PiperInterface):
-    """使能机械臂并检测使能状态,尝试0.05s,如果使能超时则退出程序."""
+    """使能机械臂并检测使能状态,尝试5秒,如果使能超时则退出程序."""
     enable_flag = all(piper.GetArmEnableStatus())
-    
-    timeout = 0.05  # 超时时间（秒）
-    interval = 0.01  # 每次轮询间隔（秒）
-    
+
+    timeout = 5.0  # 超时时间（秒）- 增加到5秒以确保机械臂有足够时间使能
+    interval = 0.1  # 每次轮询间隔（秒）
+
     start_time = time.time()
+    retry_count = 0
     while not enable_flag:
         enable_flag = piper.EnablePiper()
-        
-        print("--------------------")
-        print("使能状态:", enable_flag)
-        print("--------------------")
+        retry_count += 1
 
-        time.sleep(0.01)
+        # Only print every 10 retries to reduce log spam
+        if retry_count % 10 == 1:
+            print(f"[Piper] 使能状态: {enable_flag} (尝试 {retry_count})")
+
+        time.sleep(interval)
         elapsed_time = time.time() - start_time
         if elapsed_time > timeout:
-            print("Piper机械臂自动使能超时....")
+            print(f"[Piper] 机械臂自动使能超时 ({timeout}秒后)")
+            print("[Piper] 请检查: 1) CAN总线连接 2) 机械臂电源 3) 急停按钮")
             break
+
+    if enable_flag:
+        print(f"[Piper] 机械臂使能成功 (耗时 {elapsed_time:.2f}秒)")
 
 
 def main():
@@ -43,15 +49,22 @@ def main():
     factor = 1000 * 180 / np.pi  # Convert rad to 0.001 degrees
     node = Node()
 
+    # Initialize motion control once with a safe speed (e.g. 60%)
+    # Sending this in every loop can cause jerky motion as it resets the planner.
+    piper.MotionCtrl_2(0x01, 0x01, 60, 0x00)
+    
     ctrl_frame = 0
 
     for event in node:
         if event["type"] == "INPUT":
+            # Only enable if not already enabled to save CAN bandwidth
             if "action" in event["id"]:
-                enable_fun(piper)
-            if event["id"] == "action_joint":
-                # print(f" get action_joint")
+                enable_flag = all(piper.GetArmEnableStatus())
+                if not enable_flag:
+                    enable_fun(piper)
+                    piper.MotionCtrl_2(0x01, 0x01, 60, 0x00)
 
+            if event["id"] == "action_joint":
                 if ctrl_frame > 0:
                     continue
 
@@ -63,7 +76,6 @@ def main():
 
                 position = event["value"].to_numpy()
 
-                # print(f"action_joint: {position}")
                 joint_0 = round(position[0] * factor)
                 joint_1 = round(position[1] * factor)
                 joint_2 = round(position[2] * factor)
@@ -71,16 +83,13 @@ def main():
                 joint_4 = round(position[4] * factor)
                 joint_5 = round(position[5] * factor)
 
-                piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
                 piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-                # piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
                 if len(position) > 6 and not np.isnan(position[6]):
                     piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
 
             elif event["id"] == "action_joint_ctrl":
                 
                 ctrl_frame = 200
-
                 position = event["value"].to_numpy()
                 joint_0 = round(position[0] * factor)
                 joint_1 = round(position[1] * factor)
@@ -89,6 +98,7 @@ def main():
                 joint_4 = round(position[4] * factor)
                 joint_5 = round(position[5] * factor)
 
+                # For manual control, we might want higher speed
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
                 piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                 if len(position) > 6 and not np.isnan(position[6]):
@@ -103,7 +113,6 @@ def main():
                     continue
 
                 position = event["value"].to_numpy()
-                piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
                 piper.EndPoseCtrl(
                     position[0] * 1000 * 1000,
                     position[1] * 1000 * 1000,
@@ -112,11 +121,8 @@ def main():
                     position[4] * 1000 / (2 * np.pi) * 360,
                     position[5] * 1000 / (2 * np.pi) * 360,
                 )
-                # piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
             
             elif event["id"] == "action_gripper":
-                # print(f" get action_gripper")
-
                 # Do not push to many commands to fast. Limiting it to 30Hz
                 if time.time() - elapsed_time > 0.03:
                     elapsed_time = time.time()
@@ -124,9 +130,7 @@ def main():
                     continue
 
                 position = event["value"].to_numpy()
-                piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
-                piper.GripperCtrl(int(abs(position[0] * 1000 * 1000)), 3000, 0x01, 0)
-                # piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
+                piper.GripperCtrl(int(abs(position[0] * 1000 * 1000)), 1000, 0x01, 0)
 
             elif event["id"] == "tick":
                 # Slave Arm

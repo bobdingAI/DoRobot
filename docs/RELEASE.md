@@ -4,6 +4,44 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.131 (2025-12-19) - Fix Piper+UArm Teleoperation Issues
+
+### Summary
+Fixed multiple issues preventing Piper robot teleoperation with Anything-U-Arm leader.
+
+### Issues Fixed
+
+1. **ZhonglinMotorsBus abstract class error**
+   - UArm leader component crashed immediately with:
+     `Can't instantiate abstract class ZhonglinMotorsBus with abstract methods...`
+   - Fix: Made `ZhonglinMotorsBus` a standalone class (not inheriting from abstract `MotorsBus`)
+   - The simplified implementation is sufficient for leader arm read-only use
+
+2. **Piper arm enable timeout too short (0.05s)**
+   - Piper arm failed to enable within 50ms timeout
+   - Fix: Increased timeout from 0.05s to 5.0s
+   - Added better logging and troubleshooting hints
+
+3. **KeyError for leader arm data in recording**
+   - Recording thread crashed with `KeyError: 'main_leader_joint_1.pos'`
+   - Root cause: UArm leader crashed, so no leader arm data was being sent
+   - Fix: Resolved by fixing ZhonglinMotorsBus issue (#1)
+
+### Changes
+
+**operating_platform/robot/components/arm_normal_uarm_v1/motors/zhonglin.py:**
+- Converted `ZhonglinMotorsBus` from inheriting `MotorsBus` to standalone class
+- Added `is_connected` property for compatibility
+- Simplified implementation for leader arm read-only use
+
+**operating_platform/robot/components/arm_normal_piper_v2/main.py:**
+- Increased enable timeout from 0.05s to 5.0s
+- Changed polling interval from 0.01s to 0.1s
+- Added retry counter and reduced log spam
+- Added troubleshooting hints on timeout
+
+---
+
 ## v0.2.130 (2025-12-18) - Add Direct Cloud Download Option
 
 ### Summary
