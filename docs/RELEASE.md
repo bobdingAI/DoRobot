@@ -4,6 +4,39 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.132 (2025-12-18) - Fix SO101 Inference Action Filter
+
+### Summary
+Fixed action key filter in SO101 `send_action()` to be more robust for inference mode.
+
+### Problem
+The `send_action()` method used a filter `"joint" in key` which relied on motor names
+containing "joint" prefix. While this worked for SO101 (which has "joint_shoulder_pan" etc.),
+the fix makes the filter more robust for any motor naming convention.
+
+### Root Cause Analysis
+The action dict keys are generated from `action_features` in the format:
+`{arm_name}_{motor_name}.pos` (e.g., "main_leader_joint_shoulder_pan.pos")
+
+The filter needed to correctly match these keys to extract action values.
+
+### Changes
+
+**operating_platform/robot/robots/so101_v1/manipulator.py:**
+- Changed action key filter from `"joint" in key` to `".pos" in key`
+- Added debug warning if no action values found for an arm
+- This helps diagnose inference issues where actions aren't being sent
+
+### Testing
+When running inference, the logs should show:
+- `action:{...}` from inference.py showing the action dict
+- `zmq send event_id:action_joint_main_leader, value:[...]` showing values being sent
+
+If you see `[SO101] WARNING: No action values found for arm 'main_leader'`,
+check that action dict keys contain the arm name and end with `.pos`.
+
+---
+
 ## v0.2.131 (2025-12-19) - Fix Piper+UArm Teleoperation Issues
 
 ### Summary
