@@ -20,6 +20,8 @@
 #
 # Optional:
 #   --skip-training     Skip training (just upload + encode)
+#   --skip-upload       Skip upload and encoding (trigger training + download)
+#   --download-only     Skip upload and training (just wait + download)
 #   --repo-id NAME      Custom repo ID (default: folder name)
 #   --model-output PATH Custom model output path (default: dataset/model/)
 #   --timeout MINUTES   Training timeout in minutes (default: 120)
@@ -81,6 +83,14 @@ while [[ $# -gt 0 ]]; do
             EXTRA_ARGS="$EXTRA_ARGS --skip-training"
             shift
             ;;
+        --skip-upload)
+            EXTRA_ARGS="$EXTRA_ARGS --skip-upload"
+            shift
+            ;;
+        --download-only)
+            EXTRA_ARGS="$EXTRA_ARGS --download-only"
+            shift
+            ;;
         --repo-id)
             EXTRA_ARGS="$EXTRA_ARGS --repo-id $2"
             shift 2
@@ -105,6 +115,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Optional:"
             echo "  --skip-training     Skip training (just upload + encode)"
+            echo "  --skip-upload       Skip upload and encoding (trigger training + download)"
+            echo "  --download-only     Skip upload and training (just wait + download)"
             echo "  --repo-id NAME      Custom repo ID (default: folder name)"
             echo "  --model-output PATH Custom model output path (default: dataset/model/)"
             echo "  --timeout MINUTES   Training timeout in minutes (default: 120)"

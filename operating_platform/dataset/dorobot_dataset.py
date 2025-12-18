@@ -967,11 +967,9 @@ class DoRobotDataset(torch.utils.data.Dataset):
         import copy
 
         if episode_data:
-            # IMPORTANT: Deep copy to preserve original buffer for retry compatibility.
-            # The async saver may retry failed saves, and we use .pop() below which
-            # modifies the buffer. Without this copy, retries would fail with
-            # "size key not found in episode_buffer" because keys were already popped.
-            episode_buffer = copy.deepcopy(episode_data)
+            # The async saver already deep copies the buffer before queuing.
+            # We don't need another copy here, just use the passed data.
+            episode_buffer = episode_data
         else:
             episode_buffer = self.episode_buffer
 
@@ -1112,7 +1110,10 @@ class DoRobotDataset(torch.utils.data.Dataset):
 
         episode_dict = {key: episode_buffer[key] for key in self.hf_features}
         ep_dataset = datasets.Dataset.from_dict(episode_dict, features=self.hf_features, split="train")
-        ep_dataset = embed_images(ep_dataset)
+        # MEMORY FIX: Disable image embedding on edge device collection.
+        # Storing binary image blobs in parquet is the primary cause of OOM.
+        # We store relative paths to raw PNG files instead.
+        # ep_dataset = embed_images(ep_dataset)
 
         # MEMORY FIX: Don't accumulate episodes in memory during recording.
         # Each episode is written to its own parquet file. Keeping all episodes

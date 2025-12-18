@@ -4,6 +4,37 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.127 (2025-12-18) - Fix OOM Side Effects and Restore Dataset Integrity
+
+### Summary
+Fixed OOM fix side effects that could cause missing observation image columns in parquet files. Optimized memory usage during data collection while ensuring dataset format compatibility.
+
+### Changes
+
+**operating_platform/utils/dataset.py:**
+- Restored `datasets.Image()` feature for image columns in `get_hf_features_from_features()`
+- This ensures parquet schema includes observation.images columns required for training
+
+**operating_platform/dataset/dorobot_dataset.py:**
+- Removed redundant `deepcopy()` in `save_episode()` - AsyncEpisodeSaver already creates thread-safe copy
+- Disabled `embed_images()` call in `_save_episode_table()` - stores relative PNG paths instead of binary blobs
+- This is correct for Cloud Offload mode where cloud server processes raw images
+
+**scripts/edge.sh & scripts/edge_encode.py:**
+- Implemented `--skip-upload` flag for retry when upload succeeded but training failed
+- Implemented `--download-only` flag for retry when training completed but download failed
+
+**scripts/validate_parquet_columns.py (new):**
+- Validation tool to verify parquet files contain observation.images columns
+- Usage: `python scripts/validate_parquet_columns.py <path_to_parquet>`
+
+### Memory Optimization
+- Avoid double-copying episode buffer (~50% memory reduction in save phase)
+- Skip embedding images into parquet (prevents ~1GB memory spike per episode)
+- Raw PNG paths stored instead - cloud server handles image processing
+
+---
+
 ## v0.2.126 (2025-12-18) - Document edge.sh Recovery Use Cases
 
 ### Summary

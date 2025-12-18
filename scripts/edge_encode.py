@@ -434,6 +434,8 @@ def run_retry_workflow(
     dataset_path: Path,
     repo_id: str,
     skip_training: bool = False,
+    skip_upload: bool = False,
+    download_only: bool = False,
     model_output_path: Path = None,
     timeout_minutes: int = 120,
 ) -> bool:
@@ -444,12 +446,19 @@ def run_retry_workflow(
         dataset_path: Path to dataset with raw images
         repo_id: Repository ID for the dataset
         skip_training: If True, skip training (just upload + encode)
+        skip_upload: If True, skip upload and encoding notification
+        download_only: If True, skip upload and training trigger, just download
         model_output_path: Path to save model (default: dataset_path/model)
         timeout_minutes: Training timeout in minutes (default: 120)
 
     Returns:
         True if workflow completed successfully
     """
+    # download_only implies skip_upload and we definitely want Step 4
+    if download_only:
+        skip_upload = True
+        skip_training = False # We want the "Wait and Download" step
+
     # Default model output to dataset_path/model
     if model_output_path is None:
         model_output_path = dataset_path / "model"
@@ -459,79 +468,83 @@ def run_retry_workflow(
     logger.info("=" * 60)
     logger.info(f"Dataset:     {dataset_path}")
     logger.info(f"Repo ID:     {repo_id}")
-    logger.info(f"Training:    {'skip' if skip_training else 'enabled'}")
+    logger.info(f"Upload:      {'skip' if skip_upload else 'enabled'}")
+    logger.info(f"Training:    {'skip' if skip_training or download_only else 'enabled'}")
     if not skip_training:
         logger.info(f"Model out:   {model_output_path}")
         logger.info(f"Timeout:     {timeout_minutes} minutes")
     logger.info("=" * 60)
 
-    # Validate dataset
-    if not dataset_path.exists():
-        logger.error(f"Dataset path not found: {dataset_path}")
-        return False
+    # Validate dataset (only if upload is enabled)
+    if not skip_upload:
+        if not dataset_path.exists():
+            logger.error(f"Dataset path not found: {dataset_path}")
+            return False
 
-    # Check for images directory
-    images_dir = dataset_path / "images"
-    if not images_dir.exists():
-        logger.error(f"No 'images' directory found in {dataset_path}")
-        logger.error("This script is for raw image datasets (CLOUD=2 mode)")
-        return False
+        # Check for images directory
+        images_dir = dataset_path / "images"
+        if not images_dir.exists():
+            logger.error(f"No 'images' directory found in {dataset_path}")
+            logger.error("This script is for raw image datasets (CLOUD=2 mode)")
+            return False
 
-    # Count images
-    png_count = len(list(images_dir.rglob("*.png")))
-    jpg_count = len(list(images_dir.rglob("*.jpg")))
-    image_count = png_count + jpg_count
+        # Count images
+        png_count = len(list(images_dir.rglob("*.png")))
+        jpg_count = len(list(images_dir.rglob("*.jpg")))
+        image_count = png_count + jpg_count
 
-    if image_count == 0:
-        logger.error(f"No images found in {images_dir}")
-        return False
+        if image_count == 0:
+            logger.error(f"No images found in {images_dir}")
+            return False
 
-    # Calculate total size
-    total_size = sum(f.stat().st_size for f in dataset_path.rglob("*") if f.is_file())
+        # Calculate total size
+        total_size = sum(f.stat().st_size for f in dataset_path.rglob("*") if f.is_file())
 
-    logger.info(f"\nDataset info:")
-    logger.info(f"  Images:   {image_count} ({png_count} PNG, {jpg_count} JPG)")
-    logger.info(f"  Size:     {total_size / 1024 / 1024:.2f} MB")
+        logger.info(f"\nDataset info:")
+        logger.info(f"  Images:   {image_count} ({png_count} PNG, {jpg_count} JPG)")
+        logger.info(f"  Size:     {total_size / 1024 / 1024:.2f} MB")
 
     # Step 1: Upload to edge server
-    logger.info("\n[Step 1/4] Uploading to edge server...")
-    if not upload_to_edge(dataset_path, repo_id):
-        logger.error("Upload failed")
-        return False
+    encode_ok = True
+    if not skip_upload:
+        logger.info("\n[Step 1/4] Uploading to edge server...")
+        if not upload_to_edge(dataset_path, repo_id):
+            logger.error("Upload failed")
+            return False
 
-    # Step 2: Notify edge server to encode
-    logger.info("\n[Step 2/4] Triggering encoding on edge server...")
-    encode_ok = notify_edge_and_encode(repo_id)
-    if not encode_ok:
-        logger.error("Encoding notification failed")
+        # Step 2: Notify edge server to encode
+        logger.info("\n[Step 2/4] Triggering encoding on edge server...")
+        encode_ok = notify_edge_and_encode(repo_id)
+        if not encode_ok:
+            logger.error("Encoding notification failed")
+    else:
+        logger.info("\n[Step 1 & 2/4] Skipping upload and encoding notification")
 
     # Step 3: Trigger training
     train_ok = True
-    transaction_id = None
-    if not skip_training:
+    transaction_id = "MANUAL_RESUME" # Placeholder for manual resume
+    if not skip_training and not download_only:
         logger.info("\n[Step 3/4] Triggering cloud training...")
         train_ok, transaction_id = trigger_training(repo_id)
         if not train_ok:
             logger.error("Training trigger failed")
+    elif download_only:
+        logger.info("\n[Step 3/4] Skipping training trigger (download only mode)")
     else:
         logger.info("\n[Step 3/4] Skipping training (--skip-training)")
 
     # Step 4: Wait for training and download model
     download_ok = True
-    if not skip_training and train_ok and transaction_id:
+    if not skip_training and train_ok:
         logger.info("\n[Step 4/4] Waiting for training and downloading model...")
         download_ok = wait_training_and_download(
             repo_id=repo_id,
-            transaction_id=transaction_id,
+            transaction_id=transaction_id if transaction_id else "UNKNOWN",
             local_model_path=model_output_path,
             timeout_minutes=timeout_minutes,
         )
         if not download_ok:
             logger.error("Training/download failed")
-    elif not skip_training and train_ok and not transaction_id:
-        logger.warning("\n[Step 4/4] No transaction ID - cannot wait for training")
-        logger.info("Training was triggered but model won't be downloaded automatically")
-        download_ok = False
     else:
         logger.info("\n[Step 4/4] Skipping (training not triggered)")
 
@@ -618,6 +631,16 @@ Notes:
         help="Skip training trigger (just upload + encode)",
     )
     parser.add_argument(
+        "--skip-upload",
+        action="store_true",
+        help="Skip upload and encoding notification",
+    )
+    parser.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Skip upload and training trigger, just download model",
+    )
+    parser.add_argument(
         "--model-output",
         type=Path,
         help="Path to save trained model (default: {dataset_path}/model/)",
@@ -671,6 +694,8 @@ Notes:
         dataset_path=dataset_path,
         repo_id=repo_id,
         skip_training=args.skip_training,
+        skip_upload=args.skip_upload,
+        download_only=args.download_only,
         model_output_path=model_output_path,
         timeout_minutes=args.timeout,
     )
