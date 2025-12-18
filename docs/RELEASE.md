@@ -4,6 +4,24 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.126 (2025-12-18) - Document edge.sh Recovery Use Cases
+
+### Summary
+Added documentation for edge.sh recovery/retry scenarios to handle partial workflow failures.
+
+### New Flags Documented
+- `--skip-upload` - Skip upload and encoding, trigger training + download (for when upload succeeded but training failed)
+- `--download-only` - Skip upload and training trigger, just wait and download (for when training completed but download failed)
+
+### Common Use Cases Added to README.md
+1. **Full Workflow** - Normal operation
+2. **Upload Failed** - Resume upload automatically with standard command (rsync handles incremental sync)
+3. **Training Failed** - Use `--skip-upload` to retry training without re-uploading
+4. **Download Failed** - Use `--download-only` to just download the trained model
+5. **Connection Test** - Use `--test-connection` to verify credentials before starting
+
+---
+
 ## v0.2.125 (2025-12-18) - Piper Robot Arm + Anything-U-Arm Teleoperation Integration
 
 ### Summary

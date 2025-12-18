@@ -447,26 +447,64 @@ Required:
 
 Optional:
   --skip-training     Skip training (just upload + encode)
+  --skip-upload       Skip upload and encoding (trigger training + download)
+  --download-only     Skip upload and training (just wait + download)
   --repo-id NAME      Custom repo ID (default: folder name)
   --model-output PATH Custom model output path (default: dataset/model/)
   --timeout MINUTES   Training timeout in minutes (default: 120)
   --test-connection   Only test SSH and API connections
 ```
 
-### Examples
+### Common Use Cases
+
+**1. Full Workflow (Normal Operation)**
+```bash
+scripts/edge.sh -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1
+```
+
+**2. Data Collection Done, but Upload Failed**
+
+If the collection finished but the script stopped or failed during the upload (e.g., network issue), simply run the standard command again. The script uses rsync that only uploads missing/changed files, so it will resume quickly:
+```bash
+# Standard command - will resume upload automatically
+scripts/edge.sh -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1
+```
+
+**3. Upload Done, but Training Failed (Instance Busy)**
+
+If the data is already on the edge server but training trigger failed (e.g., all cloud GPUs were busy), skip the upload step:
+```bash
+# Skip upload/encoding, just trigger training and wait for download
+scripts/edge.sh -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1 --skip-upload
+```
+
+**4. Training Done, but Download Failed**
+
+If training completed on the cloud but the script crashed during download (e.g., local disk full or permission error), use download-only mode:
+```bash
+# Just wait and download the trained model (skips upload and training trigger)
+scripts/edge.sh -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1 --download-only
+```
+
+**5. Connection Test Helper**
+
+Verify your credentials and network connection to both edge server and API before starting:
+```bash
+# Only test connections
+scripts/edge.sh -u gpu1 -p 'YourPassword#' --test-connection
+```
+
+### Additional Examples
 
 ```bash
-# Full workflow for user "alice"
-scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task
-
-# Skip training (just encode and upload)
+# Skip training (just encode and upload, no cloud training)
 scripts/edge.sh -u bob -p bob456 -d ~/DoRobot/dataset/my-task --skip-training
 
 # Custom training timeout (3 hours)
 scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task --timeout 180
 
-# Test connection first
-scripts/edge.sh -u alice -p alice123 --test-connection
+# Custom model output path
+scripts/edge.sh -u alice -p alice123 -d ~/DoRobot/dataset/my-task --model-output ~/models/my-model
 ```
 
 ### Multi-User Support
