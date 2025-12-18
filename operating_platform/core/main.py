@@ -49,6 +49,47 @@ DEFAULT_FPS = 30
 # Global cloud credentials (set at startup if CLOUD_OFFLOAD=1)
 _cloud_credentials = None
 
+# Memory monitoring settings
+# Default memory limit in GB (can be overridden by MEMORY_LIMIT_GB environment variable)
+DEFAULT_MEMORY_LIMIT_GB = 16.0
+# Memory check interval in frames (check every N frames, at 30 FPS this is ~3 seconds)
+MEMORY_CHECK_INTERVAL = 100
+
+
+def get_memory_usage_gb() -> float:
+    """Get current process memory usage in GB using psutil."""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        return memory_info.rss / (1024 ** 3)  # Convert bytes to GB
+    except ImportError:
+        # Fallback if psutil not installed
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        return usage.ru_maxrss / (1024 ** 2)  # Convert KB to GB (macOS reports in bytes)
+    except Exception:
+        return 0.0
+
+
+def get_memory_limit_gb() -> float:
+    """Get memory limit from environment variable or default."""
+    try:
+        return float(os.environ.get("MEMORY_LIMIT_GB", DEFAULT_MEMORY_LIMIT_GB))
+    except ValueError:
+        return DEFAULT_MEMORY_LIMIT_GB
+
+
+def should_auto_stop_for_memory() -> tuple[bool, float, float]:
+    """
+    Check if recording should auto-stop due to memory usage.
+    Returns: (should_stop, current_usage_gb, limit_gb)
+    """
+    limit_gb = get_memory_limit_gb()
+    current_gb = get_memory_usage_gb()
+    should_stop = current_gb >= limit_gb
+    return should_stop, current_gb, limit_gb
+
 # Cloud offload modes
 OFFLOAD_LOCAL = 0           # Encode locally, NO upload (local only)
 OFFLOAD_CLOUD_RAW = 1       # Skip encoding, upload raw images to cloud for encoding
@@ -445,6 +486,11 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
             logging.info("- 'e' to stop recording, encode locally, and exit")
 
         # Episode录制循环
+        # Memory monitoring: frame counter for periodic checks
+        frame_counter = 0
+        memory_limit_gb = get_memory_limit_gb()
+        logging.info(f"Memory auto-stop limit: {memory_limit_gb:.1f} GB (set MEMORY_LIMIT_GB env to change)")
+
         while True:
             daemon.update()
             observation = daemon.get_observation()
@@ -456,6 +502,19 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 key = camera_display.show(observation, episode_index=current_episode, status="Recording")
             else:
                 key = cv2.waitKey(10)
+
+            # Memory monitoring: check every MEMORY_CHECK_INTERVAL frames
+            frame_counter += 1
+            if frame_counter % MEMORY_CHECK_INTERVAL == 0:
+                should_stop, current_gb, limit_gb = should_auto_stop_for_memory()
+                if should_stop:
+                    logging.warning("=" * 50)
+                    logging.warning(f"MEMORY LIMIT REACHED: {current_gb:.2f} GB >= {limit_gb:.1f} GB")
+                    logging.warning("Auto-stopping recording to prevent OOM crash")
+                    logging.warning("=" * 50)
+                    log_say(f"内存已达上限{limit_gb:.0f}G，自动停止录制。", play_sounds=True)
+                    # Simulate 'e' key press to trigger graceful exit
+                    key = ord('e')
 
             # 处理用户输入
             if key in [ord('n'), ord('N')]:

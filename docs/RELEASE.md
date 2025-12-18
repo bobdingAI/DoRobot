@@ -4,6 +4,49 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.128 (2025-12-18) - Revert Bounded Queue, Add Memory-Based Auto-Stop
+
+### Summary
+Reverted bounded queue (v0.2.123) which caused SO101 inference quality degradation. Added memory-based auto-stop to prevent OOM while preserving recording timing consistency.
+
+### Root Cause
+The bounded queue introduced in v0.2.123 caused recording loop blocking when disk I/O couldn't keep up with camera FPS. This disrupted action-observation temporal alignment, leading to degraded inference quality for pick-and-place tasks.
+
+### Solution
+- Revert to unbounded queue to preserve v0.2.115 recording timing behavior
+- Add memory monitoring to auto-stop recording when memory limit reached
+- Configurable via `MEMORY_LIMIT_GB` environment variable (default: 16 GB)
+
+### Changes
+
+**operating_platform/dataset/image_writer.py:**
+- Reverted `queue.Queue()` and `multiprocessing.JoinableQueue()` to unbounded (no maxsize)
+- Updated docstring to document the reversion and rationale
+- Memory management delegated to recording loop auto-stop
+
+**operating_platform/core/main.py:**
+- Added `DEFAULT_MEMORY_LIMIT_GB = 16.0` constant
+- Added `MEMORY_CHECK_INTERVAL = 100` (check every ~3 seconds at 30 FPS)
+- Added `get_memory_usage_gb()` using psutil (with resource fallback)
+- Added `get_memory_limit_gb()` to read from `MEMORY_LIMIT_GB` env var
+- Added `should_auto_stop_for_memory()` to check if limit exceeded
+- Added memory check in recording loop that triggers graceful exit when limit reached
+
+### Usage
+```bash
+# Default: 16 GB limit
+bash scripts/run_so101.sh
+
+# Custom limit: 20 GB
+MEMORY_LIMIT_GB=20 bash scripts/run_so101.sh
+```
+
+### Why This Matters
+- **Bounded queue**: Blocks when full -> disrupts timing -> poor training data -> bad inference
+- **Unbounded queue + auto-stop**: Never blocks -> consistent timing -> clean data -> good inference
+
+---
+
 ## v0.2.127 (2025-12-18) - Fix OOM Side Effects and Restore Dataset Integrity
 
 ### Summary
