@@ -472,6 +472,64 @@ class PikaV1RobotConfig(RobotConfig):
         }
     )
 
+
+@RobotConfig.register_subclass("piper_uarm")
+@dataclass
+class PiperUArmRobotConfig(ManipulatorRobotConfig):
+    leader_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": FeetechMotorsBusConfig(
+                port="/dev/ttyUSB0",
+                motors={
+                    "joint_1": [1, "sts3215"],
+                    "joint_2": [2, "sts3215"],
+                    "joint_3": [3, "sts3215"],
+                    "joint_4": [4, "sts3215"],
+                    "joint_5": [5, "sts3215"],
+                    "joint_6": [6, "sts3215"],
+                    "gripper": [7, "sts3215"],
+                },
+            ),
+        }
+    )
+
+    follower_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": PiperMotorsBusConfig(
+                port="can_left",
+                motors={
+                    "joint_1": [1, "piper-motor"],
+                    "joint_2": [2, "piper-motor"],
+                    "joint_3": [3, "piper-motor"],
+                    "joint_4": [4, "piper-motor"],
+                    "joint_5": [5, "piper-motor"],
+                    "joint_6": [6, "piper-motor"],
+                    "gripper": [7, "piper-gripper"],
+                },
+            ),
+        }
+    )
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "image_top": OpenCVCameraConfig(
+                camera_index=0,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+            "image_wrist": OpenCVCameraConfig(
+                camera_index=1,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+        }
+    )
+
+    use_videos: bool = True
+
+
 @RobotConfig.register_subclass("so101")
 @dataclass
 class SO101RobotConfig(ManipulatorRobotConfig):
@@ -570,6 +628,63 @@ class SO101RobotConfig(ManipulatorRobotConfig):
             # "audio_left": 4,
         }
     )
+
+
+@RobotConfig.register_subclass("piper_v1")
+@dataclass
+class PiperV1RobotConfig(ManipulatorRobotConfig):
+    leader_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": PiperMotorsBusConfig(
+                port="can_right",
+                motors={
+                    "joint_1": [1, "piper-motor"],
+                    "joint_2": [2, "piper-motor"],
+                    "joint_3": [3, "piper-motor"],
+                    "joint_4": [4, "piper-motor"],
+                    "joint_5": [5, "piper-motor"],
+                    "joint_6": [6, "piper-motor"],
+                    "gripper": [7, "piper-gripper"],
+                },
+            ),
+        }
+    )
+
+    follower_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": PiperMotorsBusConfig(
+                port="can_left",
+                motors={
+                    "joint_1": [1, "piper-motor"],
+                    "joint_2": [2, "piper-motor"],
+                    "joint_3": [3, "piper-motor"],
+                    "joint_4": [4, "piper-motor"],
+                    "joint_5": [5, "piper-motor"],
+                    "joint_6": [6, "piper-motor"],
+                    "gripper": [7, "piper-gripper"],
+                },
+            ),
+        }
+    )
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "image_top": OpenCVCameraConfig(
+                camera_index=0,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+            "image_wrist": OpenCVCameraConfig(
+                camera_index=1,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+        }
+    )
+
+    use_videos: bool = True
 
 
 

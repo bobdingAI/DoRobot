@@ -1,0 +1,59 @@
+# ===========================================================================
+# DORA Teleoperate Dataflow for Anything-U-Arm Leader + Piper Follower
+# ===========================================================================
+
+nodes:
+  - id: camera_top
+    path: ../../components/camera_opencv/main.py
+    inputs:
+      tick: dora/timer/millis/33
+    outputs:
+      - image
+    env:
+      CAPTURE_PATH: $CAMERA_TOP_PATH
+      IMAGE_WIDTH: 640
+      IMAGE_HEIGHT: 480
+
+  - id: camera_wrist
+    path: ../../components/camera_opencv/main.py
+    inputs:
+      tick: dora/timer/millis/33
+    outputs:
+      - image
+    env:
+      CAPTURE_PATH: $CAMERA_WRIST_PATH
+      IMAGE_WIDTH: 640
+      IMAGE_HEIGHT: 480
+
+  - id: arm_uarm_leader
+    path: ../../components/arm_normal_uarm_v1/main.py
+    inputs:
+      get_joint: dora/timer/millis/33
+    outputs:
+      - joint
+    env:
+      PORT: $ARM_LEADER_PORT
+      ARM_NAME: UArm-Leader
+      ARM_ROLE: leader
+
+  - id: arm_piper_follower
+    path: ../../components/arm_normal_piper_v2/main.py
+    inputs:
+      tick: dora/timer/millis/33
+      action_joint: arm_uarm_leader/joint
+      action_joint_ctrl: piper_zeromq/action_joint
+    outputs:
+      - slave_jointstate
+    env:
+      CAN_BUS: $ARM_FOLLOWER_CAN
+
+  - id: piper_zeromq
+    path: dora_zeromq.py
+    inputs: 
+      image_top: camera_top/image
+      image_wrist: camera_wrist/image
+      main_leader_joint: arm_uarm_leader/joint
+      main_follower_joint: arm_piper_follower/slave_jointstate
+    outputs:
+      - action_joint
+

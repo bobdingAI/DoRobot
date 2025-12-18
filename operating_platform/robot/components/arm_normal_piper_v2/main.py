@@ -40,8 +40,10 @@ def main():
     enable_fun(piper)
     # piper.GripperCtrl(0, 3000, 0x01, 0)
 
-    factor = 57324.840764  # 1000*180/3.14
+    factor = 1000 * 180 / np.pi  # Convert rad to 0.001 degrees
     node = Node()
+
+    ctrl_frame = 0
 
     for event in node:
         if event["type"] == "INPUT":
@@ -49,6 +51,9 @@ def main():
                 enable_fun(piper)
             if event["id"] == "action_joint":
                 # print(f" get action_joint")
+
+                if ctrl_frame > 0:
+                    continue
 
                 # Do not push to many commands to fast. Limiting it to 30Hz
                 if time.time() - elapsed_time > 0.03:
@@ -70,7 +75,24 @@ def main():
                 piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                 # piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
                 if len(position) > 6 and not np.isnan(position[6]):
-                    piper.GripperCtrl(int(abs(position[6] * 1000 * 100)), 1000, 0x01, 0)
+                    piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
+
+            elif event["id"] == "action_joint_ctrl":
+                
+                ctrl_frame = 200
+
+                position = event["value"].to_numpy()
+                joint_0 = round(position[0] * factor)
+                joint_1 = round(position[1] * factor)
+                joint_2 = round(position[2] * factor)
+                joint_3 = round(position[3] * factor)
+                joint_4 = round(position[4] * factor)
+                joint_5 = round(position[5] * factor)
+
+                piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
+                piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                if len(position) > 6 and not np.isnan(position[6]):
+                    piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
 
             elif event["id"] == "action_endpose":
                 
@@ -103,7 +125,7 @@ def main():
 
                 position = event["value"].to_numpy()
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
-                piper.GripperCtrl(int(abs(position[0] * 1000 * 100)), 3000, 0x01, 0)
+                piper.GripperCtrl(int(abs(position[0] * 1000 * 1000)), 3000, 0x01, 0)
                 # piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
 
             elif event["id"] == "tick":
@@ -119,7 +141,7 @@ def main():
                 joint_value += [joint.joint_state.joint_6.real / factor]
 
                 gripper = piper.GetArmGripperMsgs()
-                joint_value += [gripper.gripper_state.grippers_angle / 1000 / 100]
+                joint_value += [gripper.gripper_state.grippers_angle / 1000 / 1000]
 
                 node.send_output("slave_jointstate", pa.array(joint_value, type=pa.float32()))
 
@@ -153,7 +175,7 @@ def main():
                 joint_value += [joint.joint_ctrl.joint_6.real / factor]
 
                 gripper = piper.GetArmGripperCtrl()
-                joint_value += [gripper.gripper_ctrl.grippers_angle / 1000 / 100]
+                joint_value += [gripper.gripper_ctrl.grippers_angle / 1000 / 1000]
 
                 node.send_output("master_jointstate", pa.array(joint_value, type=pa.float32()))
 
@@ -176,6 +198,8 @@ def main():
                 #         type=pa.float32(),
                 #     ),
                 # )
+            
+            ctrl_frame -= 1
 
         elif event["type"] == "STOP":
             # if not TEACH_MODE:

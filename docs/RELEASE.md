@@ -4,6 +4,51 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.125 (2025-12-18) - Piper Robot Arm + Anything-U-Arm Teleoperation Integration
+
+### Summary
+Added complete integration for Agilex Piper 6-DOF robot arm as follower with Anything-U-Arm as leader arm for teleoperation and data collection.
+
+### New Components
+- `operating_platform/robot/components/arm_normal_uarm_v1/` - UArm leader arm DORA node
+- `operating_platform/robot/robots/piper_v1/` - Piper robot configuration and ZeroMQ bridge
+- `scripts/run_piper.sh` - Launcher for native Piper teleoperation
+- `scripts/run_piper_uarm.sh` - Launcher for UArm-to-Piper teleoperation
+- `docs/piper.md` - Comprehensive Piper integration documentation
+
+### Changes
+
+**operating_platform/robot/components/arm_normal_piper_v2/main.py:**
+- Added `action_joint_ctrl` input for inference mode control
+- Added `ctrl_frame` counter to prioritize inference commands over teleoperation
+
+**operating_platform/robot/components/arm_normal_piper_v2/README.md:**
+- Complete rewrite with pre-requisite steps for Piper setup
+- Added CAN bus configuration instructions
+- Added UArm teleoperation guide
+- Added troubleshooting section
+
+**operating_platform/robot/robots/configs.py:**
+- Added `PiperUArmRobotConfig` for UArm leader + Piper follower setup
+
+**operating_platform/robot/robots/utils.py:**
+- Added `piper_uarm` robot type to factory
+
+### Architecture
+```
+UArm Leader (serial) → DORA → ZeroMQ → CLI
+                              ↓
+Piper Follower (CAN) ← action_joint
+```
+
+### Pre-requisites for Piper
+1. Power on Piper arm
+2. Configure CAN bus: `sudo ip link set can_left type can bitrate 1000000 && sudo ip link set can_left up`
+3. Install piper_sdk: `pip install piper_sdk>=0.0.8`
+4. Connect UArm via USB (default /dev/ttyUSB0)
+
+---
+
 ## v0.2.124 (2025-12-17) - Add Missing Dependencies for dnf/yum Package Managers
 
 ### Summary
