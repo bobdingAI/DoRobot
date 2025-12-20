@@ -38,7 +38,7 @@ PASSWORD = "DongSheng2025#"  # Change this to your password
 DEFAULT_LOCAL_DATA_PATH = "/Users/nupylot/Public/haidian-data-10/gpu10/so101-test"  # Default local data folder path
 DEFAULT_LOCAL_MODEL_OUTPUT = "/Users/nupylot/Public/aimee-6283-out"  # Default local model download path
 
-# Edge server configuration (for CLOUD_OFFLOAD=2 mode)
+# Edge server configuration (for CLOUD=2 mode)
 # These settings are used when uploading from DoRobot client to local edge server
 EDGE_SERVER_HOST = "192.168.1.100"  # Edge server IP address
 EDGE_SERVER_USER = "dorobot"  # SSH username for edge server

@@ -46,7 +46,7 @@ import getpass
 
 DEFAULT_FPS = 30
 
-# Global cloud credentials (set at startup if CLOUD_OFFLOAD=1)
+# Global cloud credentials (set at startup if CLOUD=1)
 _cloud_credentials = None
 
 # Memory monitoring settings
@@ -389,7 +389,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     # Log offload mode status and verify connection
     if offload_mode == OFFLOAD_EDGE:
         logging.info("=" * 50)
-        logging.info("EDGE UPLOAD MODE (CLOUD_OFFLOAD=2)")
+        logging.info("EDGE UPLOAD MODE (CLOUD=2)")
         logging.info("Video encoding will be skipped - raw images sent to edge server via rsync")
         logging.info("=" * 50)
 
@@ -403,7 +403,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
     elif offload_mode == OFFLOAD_CLOUD_RAW:
         logging.info("=" * 50)
-        logging.info("CLOUD RAW MODE (CLOUD_OFFLOAD=1)")
+        logging.info("CLOUD RAW MODE (CLOUD=1)")
         logging.info("Video encoding will be skipped - raw images uploaded to cloud")
         logging.info("=" * 50)
 
@@ -417,7 +417,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
     elif offload_mode == OFFLOAD_CLOUD_ENCODED:
         logging.info("=" * 50)
-        logging.info("CLOUD ENCODED MODE (CLOUD_OFFLOAD=3)")
+        logging.info("CLOUD ENCODED MODE (CLOUD=3)")
         logging.info("Video encoding locally (NPU/CPU), then upload encoded videos to cloud")
         logging.info("=" * 50)
 
