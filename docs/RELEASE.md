@@ -4,6 +4,50 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.134 (2025-12-20) - Add GPUFree Cloud Instance Support
+
+### Summary
+Updated `train.py` cloud training client to support GPUFree cloud instances with automatic instance start/stop and proper cleanup on failures.
+
+### Why the Old Code Failed
+The previous version of `train.py` failed during training because:
+
+1. **GPUFree Instance Not Started** - Tried SSH to stopped cloud instances
+2. **No Instance Release on Failure** - Left instances in BUSY state after errors
+3. **Wrong Remote Paths** - Used hardcoded `/root/` instead of instance-specific `data_dir`
+4. **Missing Directory Preparation** - Training failed when output directories didn't exist
+
+### Changes
+
+**train.py:**
+- Added GPUFree cloud instance auto-start before SSH connection
+- Added `cancel_transaction()` for automatic instance release on client-side failures
+- Added `ensure_remote_directories()` to create data_dir, model_dir, training_logs
+- Added `data_dir` support from API response for instance-specific paths
+- Added model path search priority for `data_dir`-based paths
+- Added edge server configuration for CLOUD_OFFLOAD=2 mode
+- Updated default credentials for gpu10 user
+
+**list_gpufree.py (NEW):**
+- Added GPUFree API client library
+- Supports: list instances, start instance (with SSH ready check), stop instance
+- Used by train.py for cloud instance control
+
+### Usage
+```bash
+# Normal workflow (auto-starts GPUFree instance if configured)
+python train.py --input /path/to/dataset --output /path/to/model
+
+# Train-only mode (skip upload, just trigger training)
+python train.py --train-only TRANSACTION_ID
+```
+
+### Dependencies
+- `list_gpufree.py` - GPUFree client (optional, gracefully skipped if not available)
+- `sshpass` - Required for SSH operations
+
+---
+
 ## v0.2.133 (2025-12-19) - Add cloud_train.py Documentation
 
 ### Summary
