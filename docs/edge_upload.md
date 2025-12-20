@@ -1,4 +1,4 @@
-# Edge Upload Design (CLOUD_OFFLOAD=2)
+# Edge Upload Design (CLOUD=2)
 
 ## Overview
 
@@ -276,15 +276,15 @@ def download_model_from_cloud(
 
 | Mode | Destination | Speed | Time | Client Wait |
 |------|-------------|-------|------|-------------|
-| CLOUD_OFFLOAD=0 | Local encode | NPU | ~2-5 min | Blocked |
-| CLOUD_OFFLOAD=1 | Cloud (WAN) | ~20 Mbps | ~5 min | Blocked |
-| **CLOUD_OFFLOAD=2** | **Edge (LAN)** | **~1 Gbps** | **~6 sec** | **Minimal** |
+| CLOUD=0 | Local encode | NPU | ~2-5 min | Blocked |
+| CLOUD=1 | Cloud (WAN) | ~20 Mbps | ~5 min | Blocked |
+| **CLOUD=2** | **Edge (LAN)** | **~1 Gbps** | **~6 sec** | **Minimal** |
 
 ### Total Time Savings
 - Per episode: ~5 minutes → ~6 seconds (50x faster)
 - 10 episodes: ~50 minutes → ~1 minute saved in client wait time
 
-## CLOUD_OFFLOAD Modes
+## CLOUD Modes
 
 | Value | Mode | Description |
 |-------|------|-------------|
@@ -376,7 +376,7 @@ Manually trigger cloud training after encoding complete.
 
 ### Client Side
 - rsync failure: Retry up to 3 times with exponential backoff
-- Network timeout: Fall back to CLOUD_OFFLOAD=1 (direct cloud upload)
+- Network timeout: Fall back to CLOUD=1 (direct cloud upload)
 - Edge server unavailable: Warn user, continue with local storage
 
 ### Edge Server Side

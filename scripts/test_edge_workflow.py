@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end test for CLOUD_OFFLOAD=2 edge upload workflow.
+End-to-end test for CLOUD=2 edge upload workflow.
 
 This script simulates the full edge upload pipeline:
 1. Extract frames from sample videos to create raw image data
@@ -504,7 +504,7 @@ def run_full_workflow(
     repo_id = f"test_edge_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     logger.info("\n" + "=" * 60)
-    logger.info("CLOUD_OFFLOAD=2 Edge Workflow Test")
+    logger.info("CLOUD=2 Edge Workflow Test")
     logger.info("=" * 60)
     logger.info(f"Source:      {source_dir}")
     logger.info(f"Repo ID:     {repo_id}")
@@ -588,7 +588,7 @@ def run_full_workflow(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test CLOUD_OFFLOAD=2 edge upload workflow",
+        description="Test CLOUD=2 edge upload workflow",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for edge upload functionality (CLOUD_OFFLOAD=2 mode).
+Test script for edge upload functionality (CLOUD=2 mode).
 
 This script simulates an edge upload by:
 1. Creating test image data (or using existing dataset)

@@ -4,6 +4,35 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.136 (2025-12-20) - Standardize CLOUD Parameter Naming
+
+### Summary
+Updated code comments, log messages, and documentation to use the simplified `CLOUD=n` naming convention instead of the old `CLOUD_OFFLOAD=n` naming. This aligns with the v0.2.80 rename where shell scripts were updated to use short names (`CLOUD`, `NPU`).
+
+### Changes
+
+**Code Files:**
+- `train.py`: Updated comment from `CLOUD_OFFLOAD=2` to `CLOUD=2`
+- `operating_platform/core/main.py`: Updated all log messages to use `CLOUD=n` format
+- `operating_platform/core/edge_upload.py`: Updated docstring comment
+
+**Documentation:**
+- `docs/edge_upload.md`: Updated all references from `CLOUD_OFFLOAD` to `CLOUD`
+  - Title: `Edge Upload Design (CLOUD=2)`
+  - Mode table: `CLOUD=0`, `CLOUD=1`, `CLOUD=2`
+  - Section heading: `## CLOUD Modes`
+
+**Test Scripts:**
+- `scripts/test_edge_upload.py`: Updated docstring
+- `scripts/test_edge_workflow.py`: Updated docstring and log messages
+
+### Notes
+- Historical RELEASE.md entries are preserved as-is (they document what happened at that time)
+- Internal variable names (`cloud_offload`) unchanged to avoid breaking changes
+- Only comments, logs, and documentation updated for consistency
+
+---
+
 ## v0.2.135 (2025-12-20) - Add GPUFree Support to CLOUD_OFFLOAD Mode
 
 ### Summary

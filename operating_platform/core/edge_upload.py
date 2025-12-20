@@ -5,7 +5,7 @@ Edge Upload module for DoRobot.
 Handles uploading dataset to local edge server (API server) via SFTP/rsync.
 The edge server then encodes videos and uploads to cloud for training.
 
-This is CLOUD_OFFLOAD=2 mode - faster than direct cloud upload because:
+This is CLOUD=2 mode - faster than direct cloud upload because:
 1. LAN transfer is ~50x faster than WAN
 2. Client doesn't wait for encoding
 3. Edge server has better CPU for encoding
