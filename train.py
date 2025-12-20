@@ -3,6 +3,11 @@
 Simplified training client using only HTTP APIs - no database or backend dependencies.
 This script uploads local training data directly to the server using SSH credentials
 obtained from the API, monitors training progress, and downloads the trained model.
+
+Features:
+- GPUFree cloud instance auto-start before SSH connection
+- Automatic instance release on client-side failures
+- State-based shutdown scheduling after training completion
 """
 
 import requests
@@ -15,16 +20,140 @@ import time
 import json
 from pathlib import Path
 
+# GPUFree client for cloud instance control
+try:
+    from list_gpufree import GPUFreeClient
+    GPUFREE_AVAILABLE = True
+except ImportError:
+    GPUFREE_AVAILABLE = False
+    print("Warning: GPUFreeClient not available, cloud instance control disabled")
+
+# Default GPUFree bearer token
+DEFAULT_GPUFREE_BEARER_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6Ijk4MmFmNWE1LTc2ZTAtNDZmMy1iOGEyLTdiZjZlYmIyNzdlNiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiMm5UMUZBelViQWFVVlZtbXRNOXQ4dDNrZktxIl0sImNsaWVudF9pZCI6IjJuVDFGQXpVYkFhVVZWbW10TTl0OHQza2ZLcSIsImV4cCI6MTc2ODQ3MDExNCwiaWF0IjoxNzY1MDE0MTE4LCJpc3MiOiJodHRwczovL3d3dy5ncHVmcmVlLmNuIiwianRpIjoiNjU0MWRiYjItMjE0Zi00Y2VhLWE0ZTMtOTIxZWE2YmE5ZmFlIiwibmJmIjoxNzY1MDE0MTE4LCJzY29wZSI6Im9wZW5pZCBwcm9maWxlIG9mZmxpbmVfYWNjZXNzIGVtYWlsIHBob25lIHVzZXJfaW5mbyIsInN1YiI6IjYxMzI1NzYzODE4ODE1NDg5IiwidXNlcl9pbmZvIjp7ImlkX2NoZWNrZWQiOnRydWUsInd4X2JvdW5kIjpmYWxzZX19.LCZr_Ckax8WLtaNUUteNi7KVYu4yxfLU0tamV4V5doZtDRbGdcML9PhggkfdROs1SWtiwhINyS90bYCmXXCYkr_fXCxOKDMRGYccmzZsD0PksnDGl7xr5Um-GKWxAVm-TMaWvfApNZ9M7iyNz8tukvP7453ZhbfEWfax6DHFbZg0lb0wGInVgiQwLEPCA90YOhAfjrlNyJV58wk-R5RCJXNvKVFz3ZDZuJx41S71ETnQ9A-UErS1WUbB1ZkVQHOpUR0hkm34sdgCexxocF5QeR6-c0ie2HZzStpC2BbXl4fczjNZ2QNv-aLbQX_bMqC77pJ39X-58XnI6ClsbxvHMw"
+
 # Configuration (can be overridden by CLI args)
 API_BASE_URL = "http://127.0.0.1:8000"
-USERNAME = "userb"  # Change this to your username
-PASSWORD = "userb1234"  # Change this to your password
-DEFAULT_LOCAL_DATA_PATH = "/Users/nupylot/Public/so101-test-1127ok"  # Default local data folder path
-DEFAULT_LOCAL_MODEL_OUTPUT = "/Users/nupylot/Public/so101-test-1127out"  # Default local model download path
+USERNAME = "gpu10"  # Change this to your username
+PASSWORD = "DongSheng2025#"  # Change this to your password
+DEFAULT_LOCAL_DATA_PATH = "/Users/nupylot/Public/haidian-data-10/gpu10/so101-test"  # Default local data folder path
+DEFAULT_LOCAL_MODEL_OUTPUT = "/Users/nupylot/Public/aimee-6283-out"  # Default local model download path
+
+# Edge server configuration (for CLOUD_OFFLOAD=2 mode)
+# These settings are used when uploading from DoRobot client to local edge server
+EDGE_SERVER_HOST = "192.168.1.100"  # Edge server IP address
+EDGE_SERVER_USER = "dorobot"  # SSH username for edge server
+EDGE_SERVER_PASSWORD = "DongSheng2025#"  # SSH password for edge server
+EDGE_SERVER_PORT = 22  # SSH port
+EDGE_SERVER_PATH = "/data/dorobot/uploads"  # Remote path for dataset uploads
 
 def log(message):
     """Print timestamped log messages"""
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+
+def get_gpufree_settings_from_transaction(transaction_data):
+    """Extract GPUFree settings from transaction response data.
+
+    Args:
+        transaction_data: dict containing transaction response with GPUFree fields
+
+    Returns:
+        dict with gpufree_instance_id, gpufree_instance_uuid, gpufree_bearer_token
+        or None values if not configured.
+    """
+    return {
+        'gpufree_instance_id': transaction_data.get('gpufree_instance_id'),
+        'gpufree_instance_uuid': transaction_data.get('gpufree_instance_uuid'),
+        'gpufree_bearer_token': transaction_data.get('gpufree_bearer_token') or DEFAULT_GPUFREE_BEARER_TOKEN
+    }
+
+def start_gpufree_instance(gpufree_instance_id, gpufree_instance_uuid, bearer_token=None):
+    """Start a GPUFree instance and wait for SSH to be ready.
+
+    Args:
+        gpufree_instance_id: GPUFree instance ID (integer)
+        gpufree_instance_uuid: GPUFree instance UUID (string)
+        bearer_token: Bearer token for authentication (uses default if None)
+
+    Returns:
+        bool: True if instance started successfully, False otherwise
+    """
+    if not GPUFREE_AVAILABLE:
+        log("GPUFree client not available, skipping instance start")
+        return True  # Not an error, just not available
+
+    if not gpufree_instance_id or not gpufree_instance_uuid:
+        log("GPUFree instance control not configured, skipping start")
+        return True  # Not an error, just not configured
+
+    log(f"Starting GPUFree instance {gpufree_instance_uuid} (ID: {gpufree_instance_id})...")
+
+    try:
+        token = bearer_token or DEFAULT_GPUFREE_BEARER_TOKEN
+        client = GPUFreeClient(bearer_token=token)
+
+        success, result_msg = client.start_instance(
+            instance_id=gpufree_instance_id,
+            instance_uuid=gpufree_instance_uuid,
+            wait_for_ssh=True,
+            max_retries=30,
+            retry_interval=10
+        )
+
+        if success:
+            log(f"GPUFree instance started successfully: {result_msg}")
+            return True
+        else:
+            log(f"Failed to start GPUFree instance: {result_msg}")
+            return False
+
+    except Exception as e:
+        log(f"Error starting GPUFree instance: {e}")
+        return False
+
+def cancel_transaction(api_url, token, transaction_id):
+    """Cancel a transaction and release its allocated instance.
+
+    This should be called when the client fails to prevent the server
+    instance from staying in BUSY state.
+
+    Args:
+        api_url: API base URL
+        token: Authentication token
+        transaction_id: Transaction ID to cancel
+
+    Returns:
+        bool: True if cancelled successfully
+    """
+    log(f"Cancelling transaction {transaction_id} to release server instance...")
+
+    try:
+        response = requests.post(
+            f"{api_url}/transactions/{transaction_id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            log(f"Transaction cancelled: {result.get('message', 'Success')}")
+            log(f"Instance released: {result.get('instance_released', False)}")
+            return True
+        elif response.status_code == 400:
+            # Transaction already completed or cancelled
+            log(f"Transaction already in terminal state, no cancellation needed")
+            return True
+        else:
+            log(f"Failed to cancel transaction: HTTP {response.status_code}")
+            try:
+                error_detail = response.json().get('detail', 'Unknown error')
+                log(f"Error detail: {error_detail}")
+            except:
+                pass
+            return False
+
+    except Exception as e:
+        log(f"Error cancelling transaction: {e}")
+        return False
 
 def login(api_url, username, password):
     """Login and get authentication token"""
@@ -101,10 +230,13 @@ def setup_ssh_credentials(ssh_data):
         'host': ssh_data["ssh_host"],
         'username': ssh_data["ssh_username"],
         'password': ssh_password,
-        'port': ssh_data["ssh_port"]
+        'port': ssh_data["ssh_port"],
+        'data_dir': ssh_data.get("data_dir")  # Instance data directory from API
     }
 
     log(f"🌐 SSH Host: {ssh_info['username']}@{ssh_info['host']}:{ssh_info['port']}")
+    if ssh_info['data_dir']:
+        log(f"📁 Data Dir: {ssh_info['data_dir']}")
     return ssh_info
 
 def test_ssh_connection(ssh_info):
@@ -170,6 +302,92 @@ def create_remote_directory(ssh_info, remote_path):
 
     except Exception as e:
         log(f"❌ Error creating remote directory: {e}")
+        return False
+
+
+def ensure_remote_directories(ssh_info, transaction_data):
+    """Ensure required remote directories exist (data_dir, model_dir, training_logs).
+
+    This function automatically creates directories that are configured in the
+    instance settings if they don't already exist on the remote server.
+
+    Args:
+        ssh_info: SSH connection info dict
+        transaction_data: Transaction data containing directory paths
+
+    Returns:
+        bool: True if all directories were created/verified successfully
+    """
+    log("📁 Ensuring required remote directories exist...")
+
+    # Collect directories to create
+    directories = []
+
+    # Data directory
+    data_dir = transaction_data.get("data_dir")
+    if data_dir:
+        directories.append(data_dir)
+
+    # Model/output directory
+    model_dir = transaction_data.get("model_dir")
+    if model_dir:
+        directories.append(model_dir)
+
+    # Training logs directory (usually under data_dir or model_dir)
+    if data_dir:
+        directories.append(f"{data_dir}/training_logs")
+    if model_dir:
+        directories.append(f"{model_dir}/training_logs")
+
+    # Code directory outputs (where lerobot writes training outputs)
+    code_dir = transaction_data.get("code_dir")
+    if code_dir:
+        directories.append(f"{code_dir}/outputs")
+
+    if not directories:
+        log("   ℹ️  No custom directories configured, using defaults")
+        return True
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_dirs = []
+    for d in directories:
+        if d not in seen:
+            seen.add(d)
+            unique_dirs.append(d)
+
+    # Create all directories in a single SSH command for efficiency
+    mkdir_commands = " && ".join([f"mkdir -p '{d}'" for d in unique_dirs])
+
+    try:
+        cmd = [
+            "sshpass", "-p", ssh_info['password'],
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            "-p", str(ssh_info['port']),
+            f"{ssh_info['username']}@{ssh_info['host']}",
+            mkdir_commands
+        ]
+
+        log(f"   Creating directories: {', '.join(unique_dirs)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+
+        if result.returncode == 0:
+            log(f"✅ All required directories created/verified successfully")
+            for d in unique_dirs:
+                log(f"   ✓ {d}")
+            return True
+        else:
+            log(f"❌ Failed to create remote directories: {result.stderr}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        log("❌ Timeout while creating remote directories")
+        return False
+    except Exception as e:
+        log(f"❌ Error creating remote directories: {e}")
         return False
 
 def rsync_data(ssh_info, local_path, remote_path):
@@ -320,7 +538,19 @@ def monitor_training_via_ssh(ssh_info, transaction_id, check_interval=30, timeou
                 log(f"🔍 No active training processes found for {transaction_id}")
 
                 # Check for model files in common locations
-                model_locations = [
+                # Include data_dir-based paths if available
+                data_dir = ssh_info.get('data_dir')
+                model_locations = []
+
+                # Add data_dir-based paths first (preferred)
+                if data_dir:
+                    model_locations.extend([
+                        f"{data_dir}/outputs/train/act_{transaction_id}/checkpoints/last/pretrained_model",
+                        f"{data_dir}/outputs/train/act_{transaction_id}",
+                    ])
+
+                # Add fallback paths
+                model_locations.extend([
                     f"/root/admin-data/outputs/train/act_{transaction_id}/checkpoints/last/pretrained_model",
                     f"/root/autodl-tmp/outputs/train/act_{transaction_id}/checkpoints/last/pretrained_model",
                     f"/root/lerobot/scripts/outputs/train/act_{transaction_id}/checkpoints/last/pretrained_model",
@@ -330,7 +560,7 @@ def monitor_training_via_ssh(ssh_info, transaction_id, check_interval=30, timeou
                     f"/root/autodl-tmp/outputs/train/act_{transaction_id}",
                     f"/root/lerobot/scripts/outputs/train/act_{transaction_id}",
                     f"/root/output/{transaction_id}"
-                ]
+                ])
 
                 for model_path in model_locations:
                     cmd = [
@@ -563,32 +793,75 @@ def main():
         if not all(k in transaction_data for k in ["ssh_host", "ssh_username", "ssh_password", "ssh_port"]):
             log("❌ SSH credentials not available in transaction response")
             log("   This might mean no instance was allocated or SSH is not configured")
+            # Cancel transaction to release any allocated resources
+            cancel_transaction(args.api_url, token, transaction_id)
             sys.exit(1)
 
-        # Step 3: Setup SSH credentials
+        # Step 3: Start GPUFree instance if configured (BEFORE SSH test)
+        # Get GPUFree settings from transaction response
+        gpufree_settings = get_gpufree_settings_from_transaction(transaction_data)
+        log(f"Checking GPUFree settings for instance: {transaction_data.get('instance_id')}")
+        log(f"  gpufree_instance_id: {gpufree_settings.get('gpufree_instance_id')}")
+        log(f"  gpufree_instance_uuid: {gpufree_settings.get('gpufree_instance_uuid')}")
+
+        if gpufree_settings.get('gpufree_instance_id') and gpufree_settings.get('gpufree_instance_uuid'):
+            log("GPUFree cloud control is configured for this instance")
+            if not start_gpufree_instance(
+                gpufree_settings['gpufree_instance_id'],
+                gpufree_settings['gpufree_instance_uuid'],
+                gpufree_settings['gpufree_bearer_token']
+            ):
+                log("❌ Failed to start GPUFree instance, aborting upload")
+                # Cancel transaction to release the instance
+                cancel_transaction(args.api_url, token, transaction_id)
+                sys.exit(1)
+            log("GPUFree instance is ready, continuing with upload...")
+        else:
+            log("GPUFree cloud control not configured, skipping instance start")
+
+        # Step 4: Setup SSH credentials
         ssh_info = setup_ssh_credentials(transaction_data)
 
-        # Step 4: Test SSH connection
+        # Step 5: Test SSH connection
         if not test_ssh_connection(ssh_info):
             log("❌ SSH connection test failed, cannot proceed with rsync")
+            # Cancel transaction to release the instance back to available
+            cancel_transaction(args.api_url, token, transaction_id)
             sys.exit(1)
 
-        # Step 5: Calculate remote path (add /root/ prefix)
-        s3_data_path = transaction_data["s3_data_path"]
-        remote_path = f"/root/{s3_data_path}"
-        log(f"🎯 Remote target path: {remote_path}")
+        # Step 5.5: Ensure required remote directories exist (data_dir, model_dir, training_logs)
+        if not ensure_remote_directories(ssh_info, transaction_data):
+            log("❌ Failed to create required remote directories")
+            # Cancel transaction to release the instance
+            cancel_transaction(args.api_url, token, transaction_id)
+            sys.exit(1)
 
-        # Step 6: Create remote directory
+        # Step 6: Calculate remote path using data_dir from instance settings
+        data_dir = transaction_data.get("data_dir") or ssh_info.get("data_dir")
+        if data_dir:
+            remote_path = f"{data_dir}/{transaction_id}"
+            log(f"🎯 Remote target path (from instance settings): {remote_path}")
+        else:
+            # Fallback to legacy path if data_dir not available
+            s3_data_path = transaction_data["s3_data_path"]
+            remote_path = f"/root/{s3_data_path}"
+            log(f"⚠️  No data_dir in transaction, using fallback path: {remote_path}")
+
+        # Step 7: Create remote directory
         if not create_remote_directory(ssh_info, remote_path):
             log("❌ Failed to create remote directory")
+            # Cancel transaction to release the instance
+            cancel_transaction(args.api_url, token, transaction_id)
             sys.exit(1)
 
-        # Step 7: Upload data using rsync
+        # Step 8: Upload data using rsync
         if not rsync_data(ssh_info, local_data_path, remote_path):
             log("❌ Data upload failed")
+            # Cancel transaction to release the instance
+            cancel_transaction(args.api_url, token, transaction_id)
             sys.exit(1)
 
-        # Step 8: Mark upload complete (with retry on auth failure)
+        # Step 9: Mark upload complete (with retry on auth failure)
         upload_marked = mark_upload_complete(args.api_url, token, transaction_id, force=args.force)
         if not upload_marked:
             log("⚠️  First attempt to mark upload complete failed, trying to re-authenticate...")
@@ -597,9 +870,11 @@ def main():
             log("🔄 Re-authenticated with fresh token, retrying...")
             if not mark_upload_complete(args.api_url, token, transaction_id, force=args.force):
                 log("❌ Failed to mark upload complete even after re-authentication")
+                # Cancel transaction to release the instance
+                cancel_transaction(args.api_url, token, transaction_id)
                 sys.exit(1)
 
-        # Step 9: Monitor training progress
+        # Step 10: Monitor training progress
         log("🔄 Monitoring training progress...")
 
         completion_detected = False
