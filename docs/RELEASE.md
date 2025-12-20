@@ -4,6 +4,28 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.135 (2025-12-20) - Add GPUFree Support to CLOUD_OFFLOAD Mode
+
+### Summary
+Updated `operating_platform/core/cloud_train.py` to support GPUFree cloud instances. This fixes the same bugs that were in train.py for the CLOUD_OFFLOAD=2 edge server workflow.
+
+### Changes
+
+**operating_platform/core/cloud_train.py:**
+- Added GPUFree cloud instance auto-start before SSH connection
+- Added `cancel_transaction()` for automatic instance release on client-side failures
+- Added `ensure_remote_directories()` to create data_dir and training_logs
+- Added `data_dir` support from API response for instance-specific paths
+- Fixed remote path calculation to use `data_dir` instead of hardcoded `/root/`
+- Added GPUFree support to `run_download_only()` for model download
+
+### Affected Workflows
+- `scripts/edge.sh` - Edge server workflow (CLOUD_OFFLOAD=2)
+- `scripts/cloud_train.py` - Standalone cloud training script
+- Any code using `operating_platform.core.cloud_train.run_cloud_training()`
+
+---
+
 ## v0.2.134 (2025-12-20) - Add GPUFree Cloud Instance Support
 
 ### Summary

@@ -7,6 +7,11 @@ This is integrated with main.py to provide a 't' key option for cloud-based trai
 which is useful for edge devices (like Orange Pi) where local video encoding is slow.
 
 Uses paramiko for SSH/SFTP operations (no external sshpass dependency).
+
+Features:
+- GPUFree cloud instance auto-start before SSH connection
+- Automatic instance release on client-side failures
+- Support for instance-specific data_dir paths
 """
 
 import requests
@@ -16,6 +21,16 @@ import time
 import threading
 import logging
 from pathlib import Path
+
+# GPUFree client for cloud instance control
+try:
+    from list_gpufree import GPUFreeClient
+    GPUFREE_AVAILABLE = True
+except ImportError:
+    GPUFREE_AVAILABLE = False
+
+# Default GPUFree bearer token
+DEFAULT_GPUFREE_BEARER_TOKEN = "REDACTED_GPUFREE_TOKEN"
 
 # Default API configuration - can be overridden via environment variables
 DEFAULT_API_BASE_URL = os.environ.get("DOROBOT_API_URL", "http://127.0.0.1:8000")
@@ -46,7 +61,12 @@ class CloudTrainer:
         self.transaction_id = None
         self.ssh_info = None
         self.remote_path = None
+        self.data_dir = None
         self._ssh_client = None
+        # GPUFree settings
+        self.gpufree_instance_id = None
+        self.gpufree_instance_uuid = None
+        self.gpufree_bearer_token = None
 
     def login(self) -> bool:
         """Login and get authentication token"""
@@ -92,6 +112,11 @@ class CloudTrainer:
             self.transaction_id = transaction_data["transaction_id"]
             log(f"Transaction started: {self.transaction_id}")
 
+            # Extract GPUFree settings
+            self.gpufree_instance_id = transaction_data.get('gpufree_instance_id')
+            self.gpufree_instance_uuid = transaction_data.get('gpufree_instance_uuid')
+            self.gpufree_bearer_token = transaction_data.get('gpufree_bearer_token') or DEFAULT_GPUFREE_BEARER_TOKEN
+
             # Check SSH credentials
             if not all(k in transaction_data for k in ["ssh_host", "ssh_username", "ssh_password", "ssh_port"]):
                 log("SSH credentials not available")
@@ -106,14 +131,112 @@ class CloudTrainer:
                 'port': int(transaction_data["ssh_port"])
             }
 
-            # Calculate remote path
-            s3_data_path = transaction_data["s3_data_path"]
-            self.remote_path = f"/root/{s3_data_path}"
-            log(f"Remote path: {self.remote_path}")
+            # Get data_dir from instance settings
+            self.data_dir = transaction_data.get("data_dir")
+
+            # Calculate remote path using data_dir if available
+            if self.data_dir:
+                self.remote_path = f"{self.data_dir}/{self.transaction_id}"
+                log(f"Remote path (from data_dir): {self.remote_path}")
+            else:
+                # Fallback to legacy path
+                s3_data_path = transaction_data["s3_data_path"]
+                self.remote_path = f"/root/{s3_data_path}"
+                log(f"Remote path (fallback): {self.remote_path}")
 
             return True
         except Exception as e:
             log(f"Failed to start transaction: {e}")
+            return False
+
+    def start_gpufree_instance(self) -> bool:
+        """Start GPUFree cloud instance and wait for SSH to be ready."""
+        if not GPUFREE_AVAILABLE:
+            log("GPUFree client not available, skipping instance start")
+            return True  # Not an error, just not available
+
+        if not self.gpufree_instance_id or not self.gpufree_instance_uuid:
+            log("GPUFree instance control not configured, skipping start")
+            return True  # Not an error, just not configured
+
+        log(f"Starting GPUFree instance {self.gpufree_instance_uuid} (ID: {self.gpufree_instance_id})...")
+
+        try:
+            client = GPUFreeClient(bearer_token=self.gpufree_bearer_token)
+            success, result_msg = client.start_instance(
+                instance_id=self.gpufree_instance_id,
+                instance_uuid=self.gpufree_instance_uuid,
+                wait_for_ssh=True,
+                max_retries=30,
+                retry_interval=10
+            )
+
+            if success:
+                log(f"GPUFree instance started successfully: {result_msg}")
+                return True
+            else:
+                log(f"Failed to start GPUFree instance: {result_msg}")
+                return False
+
+        except Exception as e:
+            log(f"Error starting GPUFree instance: {e}")
+            return False
+
+    def cancel_transaction(self) -> bool:
+        """Cancel transaction and release allocated instance."""
+        if not self.transaction_id:
+            return True
+
+        log(f"Cancelling transaction {self.transaction_id} to release server instance...")
+
+        try:
+            response = requests.post(
+                f"{self.api_base_url}/transactions/{self.transaction_id}/cancel",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                log(f"Transaction cancelled: {result.get('message', 'Success')}")
+                return True
+            elif response.status_code == 400:
+                log("Transaction already in terminal state, no cancellation needed")
+                return True
+            else:
+                log(f"Failed to cancel transaction: HTTP {response.status_code}")
+                return False
+
+        except Exception as e:
+            log(f"Error cancelling transaction: {e}")
+            return False
+
+    def ensure_remote_directories(self) -> bool:
+        """Ensure required remote directories exist."""
+        if not self.data_dir:
+            log("No custom directories configured, using defaults")
+            return True
+
+        directories = [
+            self.data_dir,
+            f"{self.data_dir}/training_logs",
+        ]
+
+        log(f"Creating remote directories: {', '.join(directories)}")
+
+        try:
+            client = self._get_ssh_client()
+            for d in directories:
+                stdin, stdout, stderr = client.exec_command(f"mkdir -p '{d}'")
+                exit_status = stdout.channel.recv_exit_status()
+                if exit_status != 0:
+                    log(f"Warning: Failed to create {d}: {stderr.read().decode()}")
+
+            log("Remote directories created/verified")
+            return True
+
+        except Exception as e:
+            log(f"Error creating remote directories: {e}")
             return False
 
     def _get_ssh_client(self):
@@ -460,6 +583,11 @@ def run_download_only(model_output_path: str,
             log(f"Found transaction: {trainer.transaction_id}")
             log(f"Status: {status}")
 
+            # Extract GPUFree settings
+            trainer.gpufree_instance_id = transaction_data.get('gpufree_instance_id')
+            trainer.gpufree_instance_uuid = transaction_data.get('gpufree_instance_uuid')
+            trainer.gpufree_bearer_token = transaction_data.get('gpufree_bearer_token') or DEFAULT_GPUFREE_BEARER_TOKEN
+
             # Setup SSH info for download
             if all(k in transaction_data for k in ["ssh_host", "ssh_username", "ssh_password", "ssh_port"]):
                 ssh_password = base64.b64decode(transaction_data["ssh_password"]).decode('utf-8')
@@ -477,7 +605,12 @@ def run_download_only(model_output_path: str,
             log(f"Failed to get transaction: {e}")
             return False
 
-        # Step 3: Wait for completion if not already completed
+        # Step 3: Start GPUFree instance if configured (for download)
+        if not trainer.start_gpufree_instance():
+            log("Failed to start GPUFree instance for download")
+            return False
+
+        # Step 4: Wait for completion if not already completed
         if status != "COMPLETED":
             log(f"Training not yet completed (status: {status}), waiting...")
             success, model_path = trainer.poll_training_status(
@@ -493,12 +626,12 @@ def run_download_only(model_output_path: str,
                 log("ERROR: Training completed but no model path available")
                 return False
 
-        # Step 4: Download model
+        # Step 5: Download model
         log(f"Downloading model from: {model_path}")
         if not trainer.download_model(model_path, model_output_path):
             return False
 
-        # Step 5: Modify config for local device
+        # Step 6: Modify config for local device
         trainer.modify_config_device(model_output_path, to_device="npu")
 
         log(f"Download complete! Model saved to: {model_output_path}")
@@ -538,23 +671,38 @@ def run_cloud_training(dataset_path: str, model_output_path: str,
         if not trainer.start_transaction(cloud_offload=True):
             return False
 
-        # Step 3: Test SSH
+        # Step 3: Start GPUFree instance if configured (BEFORE SSH test)
+        if not trainer.start_gpufree_instance():
+            log("Failed to start GPUFree instance, aborting")
+            trainer.cancel_transaction()
+            return False
+
+        # Step 4: Test SSH
         if not trainer.test_ssh_connection():
+            trainer.cancel_transaction()
             return False
 
-        # Step 4: Create remote directory
+        # Step 5: Ensure remote directories exist
+        if not trainer.ensure_remote_directories():
+            trainer.cancel_transaction()
+            return False
+
+        # Step 6: Create remote directory for this upload
         if not trainer.create_remote_directory():
+            trainer.cancel_transaction()
             return False
 
-        # Step 5: Upload dataset
+        # Step 7: Upload dataset
         if not trainer.upload_dataset(dataset_path):
+            trainer.cancel_transaction()
             return False
 
-        # Step 6: Mark upload complete
+        # Step 8: Mark upload complete
         if not trainer.mark_upload_complete():
+            trainer.cancel_transaction()
             return False
 
-        # Step 7: Poll training status
+        # Step 9: Poll training status
         success, model_path = trainer.poll_training_status(
             timeout_minutes=timeout_minutes,
             status_callback=status_callback
@@ -564,11 +712,11 @@ def run_cloud_training(dataset_path: str, model_output_path: str,
             log("Training did not complete successfully")
             return False
 
-        # Step 8: Download model
+        # Step 10: Download model
         if not trainer.download_model(model_path, model_output_path):
             return False
 
-        # Step 9: Modify config for local device
+        # Step 11: Modify config for local device
         trainer.modify_config_device(model_output_path, to_device="npu")
 
         log(f"Cloud training complete! Model saved to: {model_output_path}")
