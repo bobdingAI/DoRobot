@@ -4,6 +4,30 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.133 (2025-12-19) - Add cloud_train.py Documentation
+
+### Summary
+Updated README.md to document `cloud_train.py` usage for direct cloud training and all interrupted operation scenarios.
+
+### Changes
+
+**README.md:**
+- Added new section "Quick Start: Direct Cloud Training (cloud_train.py)"
+- Documented basic usage with auto-detect and explicit dataset paths
+- Added complete usage reference with all options
+- Added common use cases section covering interrupted operations:
+  - Full workflow (normal operation)
+  - Upload failed (network issue) - resume with standard command
+  - Training completed but download failed - use `--download-only`
+  - List available datasets
+- Added environment variables section for credential configuration
+
+### Related Files
+- `scripts/cloud_train.py` - Standalone cloud training script
+- `scripts/edge.sh` - Edge server workflow (already documented)
+
+---
+
 ## v0.2.132 (2025-12-18) - Fix SO101 Inference Action Filter
 
 ### Summary

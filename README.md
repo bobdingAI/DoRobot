@@ -514,6 +514,94 @@ Multiple users can run edge.sh simultaneously on the same edge server:
 - No conflicts between users with the same repo_id
 - API credentials are required for authentication
 
+---
+
+## Quick Start: Direct Cloud Training (cloud_train.py)
+
+Use `cloud_train.py` when you have a dataset locally and want to upload directly to a cloud server for training (without an edge server intermediary).
+
+### Basic Usage
+
+```bash
+# Auto-detect latest dataset and train
+python scripts/cloud_train.py
+
+# Specify dataset path
+python scripts/cloud_train.py --dataset ~/DoRobot/dataset/20251130/experimental/so101-test
+
+# List available datasets
+python scripts/cloud_train.py --list
+
+# With custom API credentials
+python scripts/cloud_train.py -u gpu1 -p 'YourPassword#' --dataset ~/DoRobot/dataset/my_task_v1
+```
+
+### cloud_train.py Usage Reference
+
+```bash
+python scripts/cloud_train.py [OPTIONS]
+
+Options:
+  -d, --dataset PATH    Path to dataset folder (default: auto-detect latest)
+  -o, --output PATH     Path to save trained model (default: ~/DoRobot/model)
+  --api-url URL         API server URL (default: from env or http://127.0.0.1:8000)
+  -u, --username USER   API username (default: from env DOROBOT_USERNAME)
+  -p, --password PASS   API password (default: from env DOROBOT_PASSWORD)
+  -t, --timeout MINUTES Training timeout in minutes (default: 120)
+  -l, --list            List available datasets and exit
+  --download-only       Skip upload, just download model from existing training
+```
+
+### Common Use Cases (cloud_train.py)
+
+**1. Full Workflow (Normal Operation)**
+```bash
+python scripts/cloud_train.py -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1
+```
+
+**2. Upload Failed (Network Issue)**
+
+Simply run the standard command again. The upload will resume:
+```bash
+# Standard command - will resume upload automatically
+python scripts/cloud_train.py -u gpu1 -p 'YourPassword#' -d ~/DoRobot/dataset/my_task_v1
+```
+
+**3. Training Completed, but Download Failed**
+
+If training completed on the cloud but the script crashed during download (e.g., disk full, permission error):
+```bash
+# Just wait and download the trained model (skips upload and training trigger)
+python scripts/cloud_train.py --download-only -u gpu1 -p 'YourPassword#'
+```
+
+**4. List Available Datasets**
+```bash
+python scripts/cloud_train.py --list
+```
+
+### Environment Variables (cloud_train.py)
+
+You can set these to avoid passing credentials each time:
+
+| Variable | Description |
+|----------|-------------|
+| `DOROBOT_API_URL` | API server URL (default: http://127.0.0.1:8000) |
+| `DOROBOT_USERNAME` | API username |
+| `DOROBOT_PASSWORD` | API password |
+
+```bash
+# Example: set environment variables
+export DOROBOT_API_URL=http://192.168.0.12:8000
+export DOROBOT_USERNAME=gpu1
+export DOROBOT_PASSWORD='YourPassword#'
+
+# Then just run without credentials
+python scripts/cloud_train.py -d ~/DoRobot/dataset/my_task_v1
+```
+
+---
+
 ## Training
 
 ```bash
