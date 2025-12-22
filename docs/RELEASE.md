@@ -4,6 +4,50 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.137 (2025-12-21) - Fix Recording Keys and Reset Workflow
+
+### Summary
+Fixed recording workflow issues where 'N' key sometimes didn't stop recording during reset phase.
+Added new key shortcuts and removed automatic timeout during environment reset.
+
+### Key Mapping Changes
+| Old Key | New Key | Action |
+|---------|---------|--------|
+| N | S | Save current episode |
+| P | N | Next episode (continue after reset) |
+| - | D | Delete last saved episode |
+| E | E | Exit and upload (unchanged) |
+
+### Bug Fixes
+
+**Issue: Recording continues during reset phase**
+- Root cause: Recording thread kept adding frames during environment reset
+- Fix: Added `pause()` and `resume()` methods to Record class
+- Recording now pauses after save, resumes when user presses 'N' for next
+
+**Issue: Auto-proceed timeout caused unexpected behavior**
+- Removed 60-second timeout in reset wait loop
+- User can now take a break (lunch) and come back to continue recording
+
+### Changes
+
+**operating_platform/core/record.py:**
+- Added `_recording_paused` flag
+- Added `pause()` method to stop recording during reset
+- Added `resume(clear_buffer=True)` method to restart recording with fresh buffer
+- Modified `process()` to skip frame capture when paused
+
+**operating_platform/core/main.py:**
+- Changed save key from 'N' to 'S'
+- Changed continue key from 'P' to 'N'
+- Added 'D' key handler for deleting last episode
+- Added `record.pause()` after save
+- Added `record.resume()` after 'N' pressed
+- Removed 60-second timeout in reset wait loop
+- Updated all voice prompts and console messages
+
+---
+
 ## v0.2.136 (2025-12-20) - Standardize CLOUD Parameter Naming
 
 ### Summary
