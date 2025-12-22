@@ -4,6 +4,40 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.138 (2025-12-21) - Add Save/Discard Choice Before Reset
+
+### Summary
+Changed recording workflow to offer save OR discard choice during recording,
+before entering the reset phase. This allows users to discard a bad take
+before saving it.
+
+### New Workflow
+```
+Recording → Press S to save OR D to discard (choice first)
+After choice → Reset environment → Press N to continue
+```
+
+### Key Mapping Updates
+| Key | Action |
+|-----|--------|
+| S | Save current episode, then show reset prompt |
+| D | Discard current episode (don't save), then show reset prompt |
+| N | Continue to next episode (after reset) |
+| E | Exit and upload |
+
+### Changes
+
+**operating_platform/core/main.py:**
+- S key: pause → save → voice prompt → wait for N/E → resume
+- D key: pause → discard → voice prompt → wait for N/E → resume
+- Removed D key from reset phase (was for deleting already-saved episodes)
+- Updated voice prompt: "录制一轮后按S键保存，然后重置环境，然后按N键继续下一轮。"
+- Added voice prompt after save: "已保存第{episode}集。"
+- Updated reset prompt: "请重置环境，然后按N键继续。"
+- Removed duplicate code blocks
+
+---
+
 ## v0.2.137 (2025-12-21) - Fix Recording Keys and Reset Workflow
 
 ### Summary
