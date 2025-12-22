@@ -464,7 +464,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     record.start()
 
     # Voice prompt: ready to start
-    log_say("准备就绪。按N键保存并开始下一集。", play_sounds=True)
+    log_say("准备就绪。按S键保存，按N键继续下一集。", play_sounds=True)
 
     # 主循环：连续录制多个episodes
     while True:
@@ -472,8 +472,9 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         current_episode = record.dataset.meta.total_episodes
 
         logging.info("Recording active. Press:")
-        logging.info("- 'n' to save current episode and start new one")
-        logging.info("- 'p' to proceed after environment reset")
+        logging.info("- 's' to save current episode")
+        logging.info("- 'n' to proceed to next episode after reset")
+        logging.info("- 'd' to delete last saved episode")
         if offload_mode == OFFLOAD_EDGE:
             logging.info("- 'e' to stop and upload to edge server for encoding/training")
         elif offload_mode == OFFLOAD_CLOUD_RAW:
@@ -517,8 +518,11 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     key = ord('e')
 
             # 处理用户输入
-            if key in [ord('n'), ord('N')]:
-                logging.info("Saving current episode and starting new one...")
+            if key in [ord('s'), ord('S')]:
+                logging.info("Saving current episode...")
+
+                # Pause recording during reset phase to avoid recording reset images
+                record.pause()
 
                 # Save current episode (non-blocking)
                 metadata = record.save()
@@ -535,17 +539,14 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                        f"{status['failed_episodes']}")
 
                 logging.info("*"*30)
-                logging.info("Reset Environment - Press 'p' to proceed to next episode")
+                logging.info("Reset Environment - Press 'n' to proceed to next episode, 'd' to delete")
                 logging.info("*"*30)
 
                 # Voice prompt: reset environment
-                log_say("请重置环境。按P键继续。", play_sounds=True)
+                log_say("请重置环境。按N键继续，D键删除。", play_sounds=True)
 
-                # Wait for 'p' to proceed (with timeout)
-                reset_start = time.time()
-                reset_timeout = 60  # 60 seconds timeout
-
-                while time.time() - reset_start < reset_timeout:
+                # Wait for user input (no timeout - user can take a break)
+                while True:
                     daemon.update()
                     observation = daemon.get_observation()
 
@@ -553,13 +554,21 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     # Get next episode index from the new buffer (allocated after save)
                     if observation and not is_headless():
                         next_episode = record.dataset.episode_buffer.get("episode_index", 0)
-                        key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press P")
+                        key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press N")
                     else:
                         key = cv2.waitKey(10)
 
-                    if key in [ord('p'), ord('P')]:
+                    if key in [ord('n'), ord('N')]:
                         logging.info("Reset confirmed. Proceeding to next episode...")
+                        # Resume recording with fresh buffer
+                        record.resume(clear_buffer=True)
                         break
+                    elif key in [ord('d'), ord('D')]:
+                        logging.info("Deleting last saved episode...")
+                        # Discard the last saved episode
+                        record.discard()
+                        log_say("已删除上一集。按N键继续录制。", play_sounds=True)
+                        logging.info("Episode deleted. Press 'n' to continue recording.")
                     elif key in [ord('e'), ord('E')]:
                         logging.info("User requested exit during reset phase")
 
@@ -743,8 +752,6 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                             log_say("原始图像已保存到本地。", play_sounds=True)
 
                         return
-                else:
-                    logging.info("Reset timeout - auto-proceeding to next episode")
 
                 # Voice prompt: recording new episode
                 next_episode = record.dataset.episode_buffer.get("episode_index", 0)

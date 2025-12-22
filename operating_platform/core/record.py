@@ -141,6 +141,9 @@ class Record:
         # where recording thread adds frame while buffer is being captured)
         self._buffer_lock = threading.Lock()
 
+        # Pause flag to stop recording during environment reset
+        self._recording_paused = False
+
         # Async save support
         self.use_async_save = getattr(record_cfg, 'use_async_save', True)  # Default to True
         self.async_saver = None
@@ -223,8 +226,33 @@ class Record:
         self.thread.start()
         self.running = True
 
+    def pause(self):
+        """Pause recording - stop adding frames during environment reset."""
+        self._recording_paused = True
+        logging.info("[Record] Recording paused for environment reset")
+
+    def resume(self, clear_buffer: bool = True):
+        """
+        Resume recording after environment reset.
+
+        Args:
+            clear_buffer: If True, clear any frames that may have been recorded
+                         during the pause (shouldn't happen, but safety measure).
+        """
+        if clear_buffer:
+            # Create fresh buffer to ensure no stray frames from reset phase
+            with self._buffer_lock:
+                self.dataset.episode_buffer = self._create_new_episode_buffer()
+        self._recording_paused = False
+        logging.info("[Record] Recording resumed")
+
     def process(self):
         while self.running:
+            # Skip recording when paused (during environment reset)
+            if self._recording_paused:
+                time.sleep(0.01)
+                continue
+
             if self.dataset is not None:
                 start_loop_t = time.perf_counter()
 
