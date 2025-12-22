@@ -464,7 +464,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
     record.start()
 
     # Voice prompt: ready to start
-    log_say("准备就绪。按S键保存，按N键继续下一集。", play_sounds=True)
+    log_say("录制一轮后按S键保存，然后重置环境，然后按N键继续下一轮。", play_sounds=True)
 
     # 主循环：连续录制多个episodes
     while True:
@@ -473,8 +473,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
         logging.info("Recording active. Press:")
         logging.info("- 's' to save current episode")
-        logging.info("- 'n' to proceed to next episode after reset")
-        logging.info("- 'd' to delete last saved episode")
+        logging.info("- 'd' to discard current episode (don't save)")
         if offload_mode == OFFLOAD_EDGE:
             logging.info("- 'e' to stop and upload to edge server for encoding/training")
         elif offload_mode == OFFLOAD_CLOUD_RAW:
@@ -530,6 +529,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                 # Log save status
                 if hasattr(metadata, 'episode_index'):
                     logging.info(f"Episode {metadata.episode_index} queued (queue pos: {metadata.queue_position})")
+                    log_say(f"已保存第{metadata.episode_index}集。", play_sounds=True)
 
                 # Check for save errors from previous episodes
                 if hasattr(record, 'async_saver') and record.async_saver:
@@ -539,19 +539,17 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                        f"{status['failed_episodes']}")
 
                 logging.info("*"*30)
-                logging.info("Reset Environment - Press 'n' to proceed to next episode, 'd' to delete")
+                logging.info("Reset Environment - Press 'n' to proceed to next episode")
                 logging.info("*"*30)
 
                 # Voice prompt: reset environment
-                log_say("请重置环境。按N键继续，D键删除。", play_sounds=True)
+                log_say("请重置环境，然后按N键继续。", play_sounds=True)
 
-                # Wait for user input (no timeout - user can take a break)
+                # Wait for N to continue or E to exit
                 while True:
                     daemon.update()
                     observation = daemon.get_observation()
 
-                    # Show reset view with status
-                    # Get next episode index from the new buffer (allocated after save)
                     if observation and not is_headless():
                         next_episode = record.dataset.episode_buffer.get("episode_index", 0)
                         key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press N")
@@ -560,26 +558,17 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                     if key in [ord('n'), ord('N')]:
                         logging.info("Reset confirmed. Proceeding to next episode...")
-                        # Resume recording with fresh buffer
                         record.resume(clear_buffer=True)
                         break
-                    elif key in [ord('d'), ord('D')]:
-                        logging.info("Deleting last saved episode...")
-                        # Discard the last saved episode
-                        record.discard()
-                        log_say("已删除上一集。按N键继续录制。", play_sounds=True)
-                        logging.info("Episode deleted. Press 'n' to continue recording.")
                     elif key in [ord('e'), ord('E')]:
+                        # Exit during reset - same as E key during recording
                         logging.info("User requested exit during reset phase")
-
-                        # Show collection summary BEFORE starting encoding
                         total_episodes = record.dataset.meta.total_episodes
                         logging.info("=" * 50)
                         logging.info("COLLECTION SUMMARY")
                         logging.info(f"Total episodes collected: {total_episodes}")
                         logging.info("=" * 50)
 
-                        # Voice prompt based on offload mode
                         if offload_mode == OFFLOAD_EDGE:
                             log_say(f"采集结束。共采集{total_episodes}集。正在上传到边缘服务器。", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_RAW:
@@ -591,165 +580,82 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                         else:
                             log_say(f"采集结束。共采集{total_episodes}集。请等待视频编码。", play_sounds=True)
 
-                        # Close camera display
                         camera_display.close()
                         cv2.destroyAllWindows()
                         cv2.waitKey(1)
-
-                        # Stop daemon first
-                        logging.info("Stopping DORA daemon...")
                         daemon.stop()
-                        logging.info("DORA daemon stopped")
-
-                        # Stop recording thread and wait for image writer
                         record.stop()
 
-                        # Wait for all async saves to complete (including encoding)
                         if hasattr(record, 'async_saver') and record.async_saver:
-                            status = record.async_saver.get_status()
-                            pending_total = status['pending_count'] + status['queue_size']
-                            if pending_total > 0:
-                                logging.info(f"Waiting for {pending_total} saves (queue={status['queue_size']}, pending={status['pending_count']})...")
-
                             record.async_saver.stop(wait_for_completion=True)
 
-                            final_status = record.async_saver.get_status()
-                            logging.info(f"Save stats: queued={final_status['stats']['total_queued']} "
-                                       f"completed={final_status['stats']['total_completed']} "
-                                       f"failed={final_status['stats']['total_failed']}")
+                        return
 
-                        # Run upload/training based on offload mode
-                        upload_dataset_path = str(target_dir)
-                        logging.info(f"Dataset path: {upload_dataset_path}")
+                # Voice prompt: recording new episode
+                next_episode = record.dataset.episode_buffer.get("episode_index", 0)
+                log_say(f"正在录制第{next_episode}集。", play_sounds=True)
+
+                break  # Break to restart episode loop
+
+            elif key in [ord('d'), ord('D')]:
+                logging.info("Discarding current episode...")
+
+                # Pause recording during reset phase
+                record.pause()
+
+                # Discard current episode (clear buffer without saving)
+                record.discard()
+
+                logging.info("Episode discarded (not saved)")
+                log_say("已丢弃本集。请重置环境，然后按N键继续。", play_sounds=True)
+
+                logging.info("*"*30)
+                logging.info("Reset Environment - Press 'n' to proceed to next episode")
+                logging.info("*"*30)
+
+                # Wait for N to continue (same loop as after S key)
+                while True:
+                    daemon.update()
+                    observation = daemon.get_observation()
+
+                    if observation and not is_headless():
+                        next_episode = record.dataset.episode_buffer.get("episode_index", 0)
+                        key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press N")
+                    else:
+                        key = cv2.waitKey(10)
+
+                    if key in [ord('n'), ord('N')]:
+                        logging.info("Reset confirmed. Proceeding to next episode...")
+                        record.resume(clear_buffer=True)
+                        break
+                    elif key in [ord('e'), ord('E')]:
+                        # Exit during reset - same as E key during recording
+                        logging.info("User requested exit during reset phase")
+                        total_episodes = record.dataset.meta.total_episodes
+                        logging.info("=" * 50)
+                        logging.info("COLLECTION SUMMARY")
+                        logging.info(f"Total episodes collected: {total_episodes}")
+                        logging.info("=" * 50)
 
                         if offload_mode == OFFLOAD_EDGE:
-                            # Edge upload mode - rsync to edge server, wait for training, download model
-                            logging.info("="*50)
-                            logging.info("Starting edge upload workflow...")
-                            logging.info("Will wait for training completion and model download")
-                            logging.info("="*50)
-
-                            # Model output path: ~/DoRobot/model
-                            dorobot_home = Path.home() / "DoRobot"
-                            model_output_path = dorobot_home / "model"
-                            model_output_path.mkdir(parents=True, exist_ok=True)
-                            logging.info(f"Model output path: {model_output_path}")
-
-                            try:
-                                success = run_edge_upload(
-                                    dataset_path=upload_dataset_path,
-                                    repo_id=repo_id,
-                                    trigger_training=True,
-                                    wait_for_training=True,  # Wait for training completion
-                                    timeout_minutes=120,  # 2 hours timeout
-                                    model_output_path=str(model_output_path),  # Download model after training
-                                )
-                                if success:
-                                    logging.info("="*50)
-                                    logging.info("EDGE WORKFLOW COMPLETED SUCCESSFULLY!")
-                                    logging.info(f"Model downloaded to: {model_output_path}")
-                                    logging.info("="*50)
-                                    logging.info("Model download completed. Ready to run inference.")
-                                    log_say("模型下载完成。可以开始推理了。", play_sounds=True)
-                                else:
-                                    logging.error("=" * 50)
-                                    logging.error("EDGE WORKFLOW FAILED")
-                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                    logging.error("=" * 50)
-                                    log_say("边缘工作流失败。本地数据已保存。", play_sounds=True)
-                            except Exception as e:
-                                logging.error(f"Edge upload error: {e}")
-                                logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                traceback.print_exc()
-                                log_say("边缘上传出错。本地数据已保存。", play_sounds=True)
-
+                            log_say(f"采集结束。共采集{total_episodes}集。正在上传到边缘服务器。", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_RAW:
-                            # Cloud raw mode - upload raw images to cloud for encoding
-                            logging.info(f"Local data saved at: {upload_dataset_path}")
-
-                            # Check if we have valid credentials
-                            if _cloud_credentials is None:
-                                logging.warning("=" * 50)
-                                logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
-                                logging.warning(f"Local data preserved at: {upload_dataset_path}")
-                                logging.warning("=" * 50)
-                                log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
-                            else:
-                                dorobot_home = Path.home() / "DoRobot"
-                                model_output_path = dorobot_home / "model"
-                                model_output_path.mkdir(parents=True, exist_ok=True)
-
-                                try:
-                                    username, password = _cloud_credentials
-                                    success = run_cloud_training(
-                                        dataset_path=upload_dataset_path,
-                                        model_output_path=str(model_output_path),
-                                        username=username,
-                                        password=password,
-                                        timeout_minutes=120
-                                    )
-                                    if success:
-                                        logging.info("Cloud training completed!")
-                                        log_say("训练完成。", play_sounds=True)
-                                    else:
-                                        logging.error("=" * 50)
-                                        logging.error("CLOUD TRAINING FAILED")
-                                        logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                        logging.error("=" * 50)
-                                        log_say("云端训练失败。本地数据已保存。", play_sounds=True)
-                                except Exception as e:
-                                    logging.error(f"Cloud training error: {e}")
-                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                    log_say("云端训练出错。本地数据已保存。", play_sounds=True)
-
+                            log_say(f"采集结束。共采集{total_episodes}集。正在上传到云端训练。", play_sounds=True)
                         elif offload_mode == OFFLOAD_CLOUD_ENCODED:
-                            # Cloud encoded mode - local encoding done, upload encoded videos to cloud
-                            logging.info(f"Local data saved at: {upload_dataset_path}")
-
-                            # Check if we have valid credentials
-                            if _cloud_credentials is None:
-                                logging.warning("=" * 50)
-                                logging.warning("CLOUD UPLOAD SKIPPED - No valid credentials")
-                                logging.warning(f"Local data preserved at: {upload_dataset_path}")
-                                logging.warning("=" * 50)
-                                log_say("云端上传已跳过。本地数据已保存。", play_sounds=True)
-                            else:
-                                dorobot_home = Path.home() / "DoRobot"
-                                model_output_path = dorobot_home / "model"
-                                model_output_path.mkdir(parents=True, exist_ok=True)
-
-                                try:
-                                    username, password = _cloud_credentials
-                                    success = run_cloud_training(
-                                        dataset_path=upload_dataset_path,
-                                        model_output_path=str(model_output_path),
-                                        username=username,
-                                        password=password,
-                                        timeout_minutes=120
-                                    )
-                                    if success:
-                                        logging.info("Cloud training completed!")
-                                        log_say("训练完成。模型已下载。", play_sounds=True)
-                                    else:
-                                        logging.error("=" * 50)
-                                        logging.error("CLOUD TRAINING FAILED")
-                                        logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                        logging.error("=" * 50)
-                                        log_say("云端训练失败。本地数据已保存。", play_sounds=True)
-                                except Exception as e:
-                                    logging.error(f"Cloud training error: {e}")
-                                    logging.error(f"Local data preserved at: {upload_dataset_path}")
-                                    log_say("云端训练出错。本地数据已保存。", play_sounds=True)
-
+                            log_say(f"采集结束。共采集{total_episodes}集。正在编码并上传到云端。", play_sounds=True)
                         elif offload_mode == OFFLOAD_LOCAL_RAW:
-                            # Local raw mode - just save locally, no upload
-                            logging.info("="*50)
-                            logging.info("LOCAL RAW MODE - Data saved successfully")
-                            logging.info(f"Raw images saved at: {upload_dataset_path}")
-                            logging.info("="*50)
-                            logging.info("To upload and encode later, run:")
-                            logging.info(f"  python scripts/edge_encode.py --dataset {upload_dataset_path}")
-                            log_say("原始图像已保存到本地。", play_sounds=True)
+                            log_say(f"采集结束。共采集{total_episodes}集。原始图像已保存到本地。", play_sounds=True)
+                        else:
+                            log_say(f"采集结束。共采集{total_episodes}集。请等待视频编码。", play_sounds=True)
+
+                        camera_display.close()
+                        cv2.destroyAllWindows()
+                        cv2.waitKey(1)
+                        daemon.stop()
+                        record.stop()
+
+                        if hasattr(record, 'async_saver') and record.async_saver:
+                            record.async_saver.stop(wait_for_completion=True)
 
                         return
 
