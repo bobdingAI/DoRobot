@@ -4,6 +4,35 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.140 (2025-12-22) - Fix Non-Consecutive Episode Indices Bug
+
+### Summary
+Fixed critical bug where episode indices were non-consecutive (0, 2, 4, 6, 8...)
+instead of consecutive (0, 1, 2, 3, 4...).
+
+### Root Cause
+Double allocation of episode indices:
+1. `save_async()` saves current buffer and creates NEW buffer with next index
+2. `resume(clear_buffer=True)` was creating ANOTHER new buffer, skipping an index
+
+Flow before fix:
+- save() → saves ep 0, creates buffer for ep 1
+- resume(clear_buffer=True) → throws away ep 1 buffer, creates buffer for ep 2
+- Result: episodes 0, 2, 4, 6, 8...
+
+### Fix
+Changed `resume(clear_buffer=False)` after save, since `save_async()` already
+creates the new buffer. Keep `clear_buffer=True` after discard (which only
+clears buffer, doesn't create new one).
+
+### Changes
+
+**operating_platform/core/main.py:**
+- S key handler: `record.resume(clear_buffer=False)` (buffer already created by save)
+- D key handler: `record.resume(clear_buffer=True)` (need new buffer after discard)
+
+---
+
 ## v0.2.139 (2025-12-21) - Add Quick Start Guide for CLOUD/NPU Options
 
 ### Summary

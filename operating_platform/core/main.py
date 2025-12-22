@@ -558,7 +558,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
 
                     if key in [ord('n'), ord('N')]:
                         logging.info("Reset confirmed. Proceeding to next episode...")
-                        record.resume(clear_buffer=True)
+                        # clear_buffer=False because save_async() already created new buffer
+                        record.resume(clear_buffer=False)
                         break
                     elif key in [ord('e'), ord('E')]:
                         # Exit during reset - same as E key during recording
