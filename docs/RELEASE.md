@@ -4,6 +4,27 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.139 (2025-12-21) - Add Quick Start Guide for CLOUD/NPU Options
+
+### Summary
+Added comprehensive quick_start.md documentation covering CLOUD offload modes,
+NPU configuration, and recovery workflows when operations fail.
+
+### New Documentation
+
+**docs/quick_start.md:**
+- CLOUD offload modes (0-4) with usage examples
+- NPU configuration for Ascend hardware
+- Recovery workflows for common failure scenarios:
+  - Encoding failed → use edge.sh --skip-upload
+  - Upload failed → resume with edge.sh or train.py
+  - Training stuck → use train.py --train-only
+  - Download failed → use train.py --download-only
+- Environment variables reference
+- Troubleshooting guide
+
+---
+
 ## v0.2.138 (2025-12-21) - Add Save/Discard Choice Before Reset
 
 ### Summary
