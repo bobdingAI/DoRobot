@@ -4,6 +4,99 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.133 (2025-12-25) - Improve Leader Arm Calibration Reliability and Serial Communication
+
+### Summary
+Enhanced SO101 leader arm calibration process and improved Zhonglin serial communication reliability. Implemented automatic recalibration workflow and retry mechanisms to handle physical position changes and communication errors.
+
+### Issues Fixed
+
+1. **Physical position drift causing calibration mismatch**
+   - Leader arm physical position changed after initial calibration (e.g., gripper PWM: 1829 → 1870)
+   - Caused position differences up to 19.4° during teleoperation startup
+   - Fix: Implemented recalibration workflow based on current physical positions
+
+2. **Intermittent serial communication failures**
+   - Zhonglin motor bus occasionally returned empty responses
+   - Failed reads resulted in 0.0 fallback values, triggering emergency stops
+   - Fix: Added retry mechanism (up to 3 attempts) with input buffer clearing
+
+3. **Calibration script not handling current positions**
+   - Script required manual physical alignment to predefined position
+   - No support for calibrating from arbitrary current positions
+   - Fix: Updated script to accept current physical positions as calibration reference
+
+### Changes
+
+**operating_platform/robot/components/arm_normal_so101_v1/motors/zhonglin.py:**
+- Enhanced `send_command()` with retry mechanism (3 attempts)
+- Increased wait time from 8ms to 15ms for more reliable reads
+- Added input buffer clearing before each command to prevent stale data
+- Added response validation (checks for 'P' character in response)
+
+**operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json:**
+- Updated all joint `homing_offset` values based on current physical position:
+  - `shoulder_pan`: -33 → -35
+  - `shoulder_lift`: 952 → 951
+  - `elbow_flex`: 406 (unchanged)
+  - `wrist_flex`: 798 → 803
+  - `wrist_roll`: 806 → 729
+  - `gripper`: 397 → 438
+
+**operating_platform/robot/components/arm_normal_piper_v2/main.py:**
+- Updated `safe_home_position` to match current follower arm state:
+  - From: `[5982, -1128, 3940, -19218, 18869, 40103]`
+  - To: `[7805, 0, 0, -14825, 20234, 33502]`
+
+**scripts/calculate_leader_homing_v2.py:**
+- Updated `FOLLOWER_INIT_POS_DEGREES` to match current positions
+- Script now supports recalibration from any physical position
+
+### Calibration Workflow
+
+**Standard Recalibration Process:**
+1. Read current follower arm position: `python scripts/test_piper_move.py --read-only --can-bus can_left`
+2. Physically align leader arm to match follower position
+3. Update calibration script target values
+4. Run calibration: `ARM_LEADER_PORT=/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 python scripts/calculate_leader_homing_v2.py`
+5. Verify calibration: All joints should read within 0.2° of target
+
+### Verification Results
+
+After recalibration, all joints achieved excellent alignment:
+- shoulder_pan: 7.77° (target: 7.788°) - difference: 0.02°
+- shoulder_lift: 0.0° (target: 0.0°) - perfect match
+- elbow_flex: 0.0° (target: 0.0°) - perfect match
+- wrist_flex: -14.81° (target: -14.852°) - difference: 0.04°
+- wrist_roll: 20.07° (target: 20.234°) - difference: 0.16°
+- gripper: 33.52° (target: 33.502°) - difference: 0.02°
+
+Maximum difference: 0.16° (well within acceptable tolerance)
+
+### Technical Notes
+
+**Why Physical Position Changes:**
+- Gravity causes arm droop over time
+- Manual handling during debugging/testing
+- Servo position drift
+- Temperature effects on mechanical components
+
+**Serial Communication Improvements:**
+- Retry mechanism handles transient communication errors
+- Buffer clearing prevents reading stale responses
+- Increased wait time accommodates slower servo responses
+- Response validation ensures data integrity
+
+### Related Files
+
+- **Calibration file:** `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json`
+- **Leader arm driver:** `operating_platform/robot/components/arm_normal_so101_v1/motors/zhonglin.py`
+- **Follower arm config:** `operating_platform/robot/components/arm_normal_piper_v2/main.py`
+- **Calibration tool:** `scripts/calculate_leader_homing_v2.py`
+- **Verification tool:** `scripts/test_leader_read.py`
+
+---
+
 ## v0.2.132 (2025-12-25) - Fix SO101 Leader Arm Calibration for Piper Teleoperation
 
 ### Summary

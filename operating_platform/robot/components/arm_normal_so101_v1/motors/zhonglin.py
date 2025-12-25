@@ -52,12 +52,26 @@ class ZhonglinMotorsBus:
             self.is_connected = False
             print(f"[Zhonglin] Serial port {self.port} closed")
 
-    def send_command(self, cmd: str) -> str:
+    def send_command(self, cmd: str, retries: int = 3) -> str:
+        """Send command with retry mechanism for reliability."""
         if not self.ser:
             return ""
-        self.ser.write(cmd.encode('ascii'))
-        time.sleep(0.008)
-        return self.ser.read_all().decode('ascii', errors='ignore')
+
+        for attempt in range(retries):
+            self.ser.reset_input_buffer()  # Clear any stale data
+            self.ser.write(cmd.encode('ascii'))
+            time.sleep(0.015)  # Increased from 0.008 to 0.015 for more reliable reads
+            response = self.ser.read_all().decode('ascii', errors='ignore')
+
+            # Check if we got a valid response
+            if response and 'P' in response:
+                return response
+
+            # If no valid response and not last attempt, wait a bit longer
+            if attempt < retries - 1:
+                time.sleep(0.01)
+
+        return ""  # Return empty string if all retries failed
 
     def pwm_to_angle(self, response_str: str, pwm_min=500, pwm_max=2500, angle_range=270) -> tuple[float, int]:
         """

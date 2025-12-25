@@ -12,14 +12,14 @@ from motors.zhonglin import ZhonglinMotorsBus
 from motors import Motor, MotorNormMode
 import re
 
-# 从臂的安全初始位置（度）
+# 从臂的安全初始位置（度）- 使用从臂当前实际位置
 FOLLOWER_INIT_POS_DEGREES = {
-    "shoulder_pan": 5.986,
+    "shoulder_pan": 7.788,
     "shoulder_lift": 0.0,
     "elbow_flex": 0.0,
-    "wrist_flex": -19.214,
-    "wrist_roll": 18.849,
-    "gripper": 40.109
+    "wrist_flex": -14.852,
+    "wrist_roll": 20.234,
+    "gripper": 33.502
 }
 
 def calculate_homing_offset(pwm_val, target_value, range_min, range_max, norm_mode, drive_mode=0):

@@ -57,9 +57,9 @@ def main():
 
     # SAFETY: Move to safe home position before starting teleoperation
     # This prevents sudden large movements that could blow the fuse
-    # Position obtained from actual arm state: 2025-12-25
+    # Position obtained from actual arm state: 2025-12-25 (current actual position)
     print("[Piper] 移动到安全初始位置...")
-    safe_home_position = [5982, -1128, 3940, -19218, 18869, 40103]
+    safe_home_position = [7805, 0, 0, -14825, 20234, 33505]
     piper.JointCtrl(
         safe_home_position[0],
         safe_home_position[1],
