@@ -44,6 +44,20 @@ def move_to_position(piper: C_PiperInterface, target: list[int], speed: int = 30
     print(f"Moving to: {target}")
 
 
+def get_current_position(piper: C_PiperInterface) -> list[int]:
+    """Read current joint positions from arm."""
+    joint = piper.GetArmJointMsgs()
+    current = [
+        joint.joint_state.joint_1.real,
+        joint.joint_state.joint_2.real,
+        joint.joint_state.joint_3.real,
+        joint.joint_state.joint_4.real,
+        joint.joint_state.joint_5.real,
+        joint.joint_state.joint_6.real,
+    ]
+    return current
+
+
 def main():
     parser = argparse.ArgumentParser(description="Move Piper arm to target position")
     parser.add_argument(
@@ -64,15 +78,14 @@ def main():
         default="",
         help="CAN bus interface (default: from CAN_BUS env var)",
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Only read and display current position, don't move",
+    )
 
     args = parser.parse_args()
 
-    # Safe default target: small movement from initial position
-    # Initial: [5418, -1871, -1770, -8379, 35767, 24018]
-    # Target: +5000 units (+5.0 degrees) on each joint
-    default_target = [10418, 3129, 3230, -3379, 40767, 29018]
-
-    target = args.target if args.target else default_target
     can_bus = args.can_bus or os.getenv("CAN_BUS", "")
 
     print(f"Initializing Piper arm on CAN bus: {can_bus or 'default'}")
@@ -82,10 +95,29 @@ def main():
     if not enable_arm(piper):
         sys.exit(1)
 
-    print(f"Moving to target position (speed: {args.speed}%)...")
+    # Read current position
+    print("\n读取当前关节位置...")
+    current_pos = get_current_position(piper)
+    print(f"当前位置: {current_pos}")
+    print(f"当前位置（度）: {[p/1000 for p in current_pos]}")
+
+    # If read-only mode, exit here
+    if args.read_only:
+        print("\n提示：将此位置用作起始位置，请复制上面的数组到代码中")
+        return
+
+    # Safe default target: small movement from initial position
+    # Initial: [5418, -1871, -1770, -8379, 35767, 24018]
+    # Target: +5000 units (+5.0 degrees) on each joint
+    default_target = [10418, 3129, 3230, -3379, 40767, 29018]
+
+    target = args.target if args.target else default_target
+
+    print(f"\n移动到目标位置 (速度: {args.speed}%)...")
+    print(f"目标位置: {target}")
     move_to_position(piper, target, args.speed)
 
-    print("Movement command sent. Monitor arm position to verify.")
+    print("运动命令已发送")
 
 
 if __name__ == "__main__":

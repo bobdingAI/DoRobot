@@ -26,9 +26,11 @@ def main():
     # 注册信号处理
     signal.signal(signal.SIGINT, signal_handler)
 
-    port = "/dev/ttyUSB0"
+    # Use persistent path to avoid device number changes
+    port = os.getenv("ARM_LEADER_PORT", "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0")
     baudrate = 115200
     duration = 20  # 运行20秒
+    start_time = None  # Initialize to avoid UnboundLocalError
 
     print("="*60)
     print("主臂舵机实时监控")
@@ -98,7 +100,8 @@ def main():
         print("="*60)
         print("程序终止")
         print(f"结束时间: {end_time}")
-        print(f"总运行时长: {time.time() - start_time:.2f}秒")
+        if start_time is not None:
+            print(f"总运行时长: {time.time() - start_time:.2f}秒")
         print("="*60)
 
 if __name__ == "__main__":

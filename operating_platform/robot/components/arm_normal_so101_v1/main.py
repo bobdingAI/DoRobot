@@ -111,15 +111,16 @@ def main():
     # Leader arm uses Zhonglin ASCII protocol (ZP10D controller)
     # Follower arm uses Feetech binary protocol
     if ARM_ROLE == "leader":
+        # Leader arm outputs radians for Piper follower arm compatibility
         arm_bus = ZhonglinMotorsBus(
             port=PORT,
             motors={
-                "shoulder_pan": Motor(1, "zhonglin", norm_mode_body),
-                "shoulder_lift": Motor(2, "zhonglin", norm_mode_body),
-                "elbow_flex": Motor(3, "zhonglin", norm_mode_body),
-                "wrist_flex": Motor(4, "zhonglin", norm_mode_body),
-                "wrist_roll": Motor(5, "zhonglin", norm_mode_body),
-                "gripper": Motor(6, "zhonglin", MotorNormMode.RANGE_0_100),
+                "shoulder_pan": Motor(1, "zhonglin", MotorNormMode.RADIANS),
+                "shoulder_lift": Motor(2, "zhonglin", MotorNormMode.RADIANS),
+                "elbow_flex": Motor(3, "zhonglin", MotorNormMode.RADIANS),
+                "wrist_flex": Motor(4, "zhonglin", MotorNormMode.RADIANS),
+                "wrist_roll": Motor(5, "zhonglin", MotorNormMode.RADIANS),
+                "gripper": Motor(6, "zhonglin", MotorNormMode.RADIANS),
             },
             calibration=arm_calibration,
             baudrate=115200,

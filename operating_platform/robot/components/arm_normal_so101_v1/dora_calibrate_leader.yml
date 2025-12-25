@@ -3,6 +3,8 @@ nodes:
     path: keybord.py
     outputs:
       - char
+    env:
+      PYTHON: /home/demo/miniconda3/envs/dorobot/bin/python3
 
   - id: arm_so101_calibrate
     path: calibrate.py
@@ -10,7 +12,11 @@ nodes:
       key: keybord/char
     env:
       GET_DEVICE_FROM: PORT
-      PORT: /dev/ttyACM0
+      # Use ARM_LEADER_PORT env var for persistent path, or default to /dev/ttyACM0
+      PORT: $ARM_LEADER_PORT
       ARM_NAME: SO101-leader
       ARM_ROLE: leader
+      CALIBRATION_DIR: ./.calibration/
+      PYTHON: /home/demo/miniconda3/envs/dorobot/bin/python3
+
 

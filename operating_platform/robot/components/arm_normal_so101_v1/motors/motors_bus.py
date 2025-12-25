@@ -82,6 +82,7 @@ class MotorNormMode(str, Enum):
     RANGE_0_100 = "range_0_100"
     RANGE_M100_100 = "range_m100_100"
     DEGREES = "degrees"
+    RADIANS = "radians"
 
 
 @dataclass

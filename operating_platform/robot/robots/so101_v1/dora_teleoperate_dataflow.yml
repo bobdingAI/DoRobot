@@ -68,8 +68,8 @@ nodes:
       - joint
     env:
       GET_DEVICE_FROM: PORT
-      # Set ARM_LEADER_PORT env var for persistent path, or uses default
-      PORT: $ARM_LEADER_PORT
+      # Use persistent path to avoid device number changes after reboot
+      PORT: ${ARM_LEADER_PORT:-/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0}
       ARM_NAME: SO101-leader
       ARM_ROLE: leader
       CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
@@ -81,9 +81,9 @@ nodes:
       action_joint: arm_so101_leader/joint
       action_joint_ctrl: so101_zeromq/action_joint
     outputs:
-      - slave_jointstate
+      - joint
     env:
-      CAN_BUS: $ARM_FOLLOWER_PORT
+      CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
 
   # - id: arm_so101_leader2
   #   path: ../../components/arm_normal_so101_v1/main.py

@@ -4,6 +4,130 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.132 (2025-12-25) - Fix SO101 Leader Arm Calibration for Piper Teleoperation
+
+### Summary
+Fixed SO101 (Zhonglin protocol) leader arm calibration issues preventing successful teleoperation with Piper follower arm. Resolved unit mismatches, coordinate system alignment, and enabled full 6-DOF teleoperation.
+
+### Issues Fixed
+
+1. **Incorrect leader arm calibration causing emergency stop**
+   - Leader arm readings didn't match follower arm's safe initial position
+   - Position differences exceeded 20° threshold, triggering immediate emergency stop
+   - Fix: Recalculated all joint `homing_offset` values to align coordinate systems
+
+2. **Gripper unit mismatch (RANGE_0_100 vs RADIANS)**
+   - Leader arm gripper used `MotorNormMode.RANGE_0_100` (0-100 scale)
+   - Piper follower expected all joints in radians, applied `factor = 1000 * 180 / π` conversion
+   - Result: Gripper value 40.0 became 2293° after conversion
+   - Fix: Changed leader gripper to `MotorNormMode.RADIANS` to match follower expectations
+
+3. **Wrist_flex negative angle support**
+   - Follower's safe initial position has `wrist_flex = -19.214°`
+   - Leader arm with `drive_mode=0` could only produce 0-270° (positive angles)
+   - Fix: Set `wrist_flex` to `drive_mode=1` to enable negative angle output
+
+4. **Wrist_roll calibration producing zero readings**
+   - `calibrated_pwm = pwm - homing_offset` fell below `range_min`
+   - Bounded to `range_min`, resulting in 0° output
+   - Fix: Recalculated `homing_offset` based on current physical position
+
+### Root Cause Analysis
+
+The core issue was **coordinate system misalignment** between leader and follower arms:
+
+- **Follower arm** (Piper): Moves to safe initial position `[5.986°, 0.0°, 0.0°, -19.214°, 18.849°, 40.109°]`
+- **Leader arm** (SO101): Was calibrated to read `[0°, 0°, 0°, 0°, 0°, 0°]` at same physical position
+- **Result**: 198.99° difference on shoulder_lift, triggering emergency stop
+
+**Solution**: Calibrate leader arm to read the **same values** as follower's safe initial position when physically aligned.
+
+### Changes
+
+**operating_platform/robot/components/arm_normal_so101_v1/main.py:**
+- Changed gripper from `MotorNormMode.RANGE_0_100` to `MotorNormMode.RADIANS` (line 123)
+- Ensures unit compatibility with Piper follower arm expectations
+
+**operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json:**
+- Updated all joint `homing_offset` values to align with follower's safe initial position:
+  - `shoulder_pan`: 99 → -30
+  - `shoulder_lift`: -525 → 956
+  - `elbow_flex`: 171 → 398
+  - `wrist_flex`: 57 → 791, `drive_mode`: 0 → 1 (enable negative angles)
+  - `wrist_roll`: 39 → 774
+  - `gripper`: 328 → 362
+
+**scripts/calculate_leader_homing_v2.py:** (NEW)
+- Automated calibration calculation tool
+- Reads current leader arm PWM values
+- Calculates correct `homing_offset` to match follower's safe initial position
+- Supports negative angles via `drive_mode=1`
+- Handles both RADIANS and RANGE_0_100 normalization modes
+
+**scripts/verify_leader_calibration.py:** (NEW)
+- Interactive calibration verification tool
+- Displays raw PWM values and calibrated angles
+- Guides user through manual position testing
+
+**scripts/fix_gripper_calibration.py:** (NEW)
+- Specialized tool for recalculating gripper `homing_offset` in RADIANS mode
+
+**scripts/test_leader_read.py:** (NEW)
+- Debug tool for testing leader arm joint readings with calibration applied
+
+### Calibration Formula
+
+For each joint to read target angle θ (in degrees):
+
+```
+calibrated_pwm = (θ / 270°) × (range_max - range_min) + range_min
+homing_offset = current_pwm - calibrated_pwm
+```
+
+For negative angles (e.g., wrist_flex = -19.214°):
+- Set `drive_mode = 1` to negate the output
+- Use absolute value: `θ = 19.214°`
+
+### Testing Results
+
+**Before fix:**
+- Emergency stop triggered immediately at startup
+- Position differences: [5.986°, 198.99°, 0°, 19.214°, 18.849°, 1692.79°]
+- System unusable for teleoperation
+
+**After fix:**
+- System starts successfully: "[Piper] 开始遥操作控制"
+- Initial position differences: [0.116°, 0.0°, 1.264°, 0.543°, 0.032°, ~0°]
+- All joints within acceptable limits (< 20° threshold)
+- Teleoperation functional
+
+### Usage
+
+To recalibrate leader arm after physical repositioning:
+
+```bash
+cd /home/demo/Public/DoRobot
+
+# 1. Position leader and follower arms to same physical pose
+# 2. Run calibration calculation
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate dorobot
+ARM_LEADER_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" \
+  python scripts/calculate_leader_homing_v2.py
+
+# 3. Test teleoperation
+bash scripts/run_so101.sh
+```
+
+### Technical Notes
+
+- **Zhonglin protocol**: PWM range 500-2500 maps to 0-270° physical range
+- **Piper protocol**: Uses 0.001° units (e.g., 5982 = 5.982°), expects radians from leader
+- **Calibration persistence**: Stored in `.calibration/SO101-leader.json`, loaded at startup
+- **Drive mode**: 0 = positive angles (0-270°), 1 = negative angles (0 to -270°)
+
+---
+
 ## v0.2.131 (2025-12-19) - Fix Piper+UArm Teleoperation Issues
 
 ### Summary

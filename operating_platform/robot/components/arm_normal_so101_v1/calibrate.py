@@ -13,6 +13,7 @@ import queue
 
 
 from motors.feetech import FeetechMotorsBus, OperatingMode
+from motors.zhonglin import ZhonglinMotorsBus
 from motors import Motor, MotorCalibration, MotorNormMode
 
 
@@ -61,7 +62,7 @@ def configure_leader(bus: FeetechMotorsBus) -> None:
     for motor in bus.motors:
         bus.write("Operating_Mode", motor, OperatingMode.POSITION.value)
 
-def init_calibrate(name, bus: FeetechMotorsBus) -> None:
+def init_calibrate(name, bus) -> None:
     # if self.calibration:
     #     # self.calibration is not empty here
     #     user_input = input(
@@ -73,9 +74,12 @@ def init_calibrate(name, bus: FeetechMotorsBus) -> None:
     #         return
 
     print(f"\nRunning calibration of {name}")
-    bus.disable_torque()
-    for motor in bus.motors:
-        bus.write("Operating_Mode", motor, OperatingMode.POSITION.value)
+
+    # Only configure Feetech motors (Zhonglin leader arms are passive)
+    if isinstance(bus, FeetechMotorsBus):
+        bus.disable_torque()
+        for motor in bus.motors:
+            bus.write("Operating_Mode", motor, OperatingMode.POSITION.value)
 
 
 def save_calibration(calibration: dict, fpath: Path | None = None) -> None:
@@ -117,17 +121,34 @@ def main():
 
     norm_mode_body = MotorNormMode.DEGREES if use_degrees else MotorNormMode.RANGE_M100_100
 
-    arm_bus = FeetechMotorsBus(
-        port=PORT,
-        motors={
-            "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-            "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-            "elbow_flex": Motor(3, "sts3215", norm_mode_body),
-            "wrist_flex": Motor(4, "sts3215", norm_mode_body),
-            "wrist_roll": Motor(5, "sts3215", norm_mode_body),
-            "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-        },
-    )
+    # Choose motor bus based on ARM_ROLE
+    # Leader arm uses Zhonglin ASCII protocol (ZP10D controller)
+    # Follower arm uses Feetech binary protocol
+    if ARM_ROLE == "leader":
+        arm_bus = ZhonglinMotorsBus(
+            port=PORT,
+            motors={
+                "shoulder_pan": Motor(1, "zhonglin", norm_mode_body),
+                "shoulder_lift": Motor(2, "zhonglin", norm_mode_body),
+                "elbow_flex": Motor(3, "zhonglin", norm_mode_body),
+                "wrist_flex": Motor(4, "zhonglin", norm_mode_body),
+                "wrist_roll": Motor(5, "zhonglin", norm_mode_body),
+                "gripper": Motor(6, "zhonglin", MotorNormMode.RANGE_0_100),
+            },
+            baudrate=115200,
+        )
+    else:
+        arm_bus = FeetechMotorsBus(
+            port=PORT,
+            motors={
+                "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
+                "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
+                "elbow_flex": Motor(3, "sts3215", norm_mode_body),
+                "wrist_flex": Motor(4, "sts3215", norm_mode_body),
+                "wrist_roll": Motor(5, "sts3215", norm_mode_body),
+                "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
+            },
+        )
 
     arm_bus.connect()
 
@@ -137,17 +158,32 @@ def main():
     #     configure_leader(arm_bus)
 
     init_calibrate(name, arm_bus)
-    print(f"Move {name} to the middle of its range of motion and press key 'm'....")
+
+    # Display live joint values before calibration starts
+    print(f"\n{'='*80}")
+    print(f"CALIBRATION SETUP - {name}")
+    print(f"{'='*80}")
+    print(f"\nCurrent joint positions (live update):")
+    print(f"Move {name} to the middle of its range of motion and press key 'm'...")
+    print(f"{'='*80}\n")
+
     stop_event = threading.Event()
+    calibration_started = False
+
     # 创建并启动线程
     recording_thread = threading.Thread(
-        target=record_ranges, 
+        target=record_ranges,
         args=(arm_bus, stop_event,)
     )
     # homing_offsets = []
 
     for event in node:
         if event["type"] == "INPUT":
+            # Show live joint positions before calibration starts
+            if not calibration_started and event["id"] != "key":
+                positions = arm_bus.sync_read("Present_Position")
+                print(f"\r{positions}", end='', flush=True)
+
             if event["id"] == "key":
                 key_chars = event["value"].to_pylist()
                 key = key_chars[0]
@@ -155,9 +191,10 @@ def main():
                 print(f"Received key: {key}")
 
                 if(key == 'm' or key == 'M'):
+                    calibration_started = True
                     homing_offsets = arm_bus.set_half_turn_homings()
                     recording_thread.start()
-                    print("开始记录运动范围...")
+                    print("\n开始记录运动范围...")
                     print(
                         "Move all joints sequentially through their entire ranges "
                         "of motion.\nRecording positions. Press key 'e' to stop..."
