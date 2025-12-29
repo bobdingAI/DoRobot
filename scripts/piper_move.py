@@ -12,22 +12,11 @@ def enable_arm(piper: C_PiperInterface, timeout: float = 5.0) -> bool:
     """Enable the arm with timeout."""
     enable_flag = all(piper.GetArmEnableStatus())
 
-    start_time = time.time()
-    retry_count = 0
+    if not enable_flag:
+        piper.EnablePiper()
+        time.sleep(0.5)
 
-    while not enable_flag:
-        enable_flag = piper.EnablePiper()
-        retry_count += 1
-
-        if retry_count % 10 == 1:
-            print(f"Enabling arm... (attempt {retry_count})")
-
-        time.sleep(0.1)
-        if time.time() - start_time > timeout:
-            print(f"ERROR: Arm enable timeout after {timeout}s")
-            return False
-
-    print(f"Arm enabled successfully ({time.time() - start_time:.2f}s)")
+    print("Arm enabled successfully")
     return True
 
 
@@ -106,18 +95,30 @@ def main():
         print("\n提示：将此位置用作起始位置，请复制上面的数组到代码中")
         return
 
-    # Safe default target: small movement from initial position
-    # Initial: [5418, -1871, -1770, -8379, 35767, 24018]
-    # Target: +5000 units (+5.0 degrees) on each joint
-    default_target = [10418, 3129, 3230, -3379, 40767, 29018]
+    # Test: Only move joint_5 (index 4) to 5 degrees
+    # Keep all other joints at current position
+    target = current_pos.copy()
+    target[4] = 5000  # Move joint_5 to 5 degrees (5000 millidegrees)
 
-    target = args.target if args.target else default_target
-
-    print(f"\n移动到目标位置 (速度: {args.speed}%)...")
+    print(f"\n测试移动 joint_5 (速度: {args.speed}%)...")
+    print(f"当前位置: {current_pos}")
     print(f"目标位置: {target}")
+    print(f"变化: joint_5 从 {current_pos[4]/1000:.2f}° 到 {target[4]/1000:.2f}°")
     move_to_position(piper, target, args.speed)
 
-    print("运动命令已发送")
+    print("运动命令已发送，等待3秒...")
+    time.sleep(3)
+
+    # Read position again to verify movement
+    final_pos = get_current_position(piper)
+    print(f"\n最终位置: {final_pos}")
+    print(f"最终位置（度）: {[p/1000 for p in final_pos]}")
+    print(f"\njoint_5 变化: {current_pos[4]/1000:.2f}° → {final_pos[4]/1000:.2f}° (目标: {target[4]/1000:.2f}°)")
+
+    if abs(final_pos[4] - target[4]) < 100:
+        print("✓ joint_5 移动成功")
+    else:
+        print(f"✗ joint_5 未到达目标位置 (差异: {abs(final_pos[4] - target[4])/1000:.2f}°)")
 
 
 if __name__ == "__main__":

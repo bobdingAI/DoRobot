@@ -12,14 +12,16 @@ from motors.zhonglin import ZhonglinMotorsBus
 from motors import Motor, MotorNormMode
 import re
 
-# 从臂的安全初始位置（度）- 使用从臂当前实际位置
+# 从臂的安全初始位置（度）- 从 arm_normal_piper_v2/main.py 第63行
+# safe_home_position = [5370, -2113, 3941, 3046, 18644, 24400] millidegrees
+# 这是 Piper 能够达到的最接近零点的位置（2025-12-29 更新）
 FOLLOWER_INIT_POS_DEGREES = {
-    "shoulder_pan": 7.788,
-    "shoulder_lift": 0.0,
-    "elbow_flex": 0.0,
-    "wrist_flex": -14.852,
-    "wrist_roll": 20.234,
-    "gripper": 33.502
+    "shoulder_pan": 5.370,
+    "shoulder_lift": -2.113,
+    "elbow_flex": 3.941,
+    "wrist_flex": 3.046,
+    "wrist_roll": 18.644,
+    "gripper": 24.400
 }
 
 def calculate_homing_offset(pwm_val, target_value, range_min, range_max, norm_mode, drive_mode=0):

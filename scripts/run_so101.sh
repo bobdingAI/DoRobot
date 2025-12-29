@@ -733,6 +733,15 @@ main() {
     # Step 1: Clean up stale sockets
     cleanup_stale_sockets
 
+    # Step 1.5: Prepare follower arm - move to reference position
+    log_step "Preparing follower arm..."
+    python "$PROJECT_ROOT/scripts/prepare_follower.py"
+    if [ $? -ne 0 ]; then
+        log_error "Failed to prepare follower arm"
+        exit 1
+    fi
+    echo ""
+
     # Step 2: Start DORA
     start_dora
 

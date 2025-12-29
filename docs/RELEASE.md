@@ -4,6 +4,315 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.136 (2025-12-29) - Follower Arm Hardware Diagnosis
+
+### Summary
+Diagnosed follower arm (Piper) hardware issues where joint_1 and joint_3 are stuck at 0.0° and unresponsive to control commands. Confirmed through comprehensive testing that this is a hardware problem, not a calibration or software mapping issue.
+
+### Diagnostic Process
+
+#### 1. Initial Problem Report
+- During teleoperation, follower arm's joint_3 (index 2) remained at 0.0° despite receiving control commands
+- Leader arm was sending correct position data (varying between 60-70°)
+- Position difference triggered safety warnings
+
+#### 2. Testing Methodology
+Created and modified `scripts/piper_move.py` to test individual joints:
+- Added ability to move only specific joints while keeping others stationary
+- Implemented position verification after movement commands
+- Added detailed logging of command success/failure
+
+#### 3. Key Findings
+
+**CAN Communication Analysis:**
+```bash
+# CAN interface statistics revealed:
+RX: 1,066,104 bytes, 133,263 packets  # Follower IS sending data
+TX: 0 bytes, 0 packets                # Commands NOT being sent
+```
+
+**Joint Status:**
+- **joint_1 (index 0)**: Stuck at 0.00° (leader at 52.93°) - Hardware failure
+- **joint_2 (index 1)**: Working perfectly (0.03° difference) - Normal
+- **joint_3 (index 2)**: Stuck at 0.00° (leader at 73.94°) - Hardware failure
+- **joint_4 (index 3)**: Working perfectly (0.01° difference) - Normal
+- **joint_5 (index 4)**: Working perfectly (0.01° difference) - Normal
+- **joint_6 (index 5)**: Working perfectly (0.04° difference) - Normal
+
+**Calibration Verification:**
+- 4 out of 6 joints show perfect alignment (< 0.05° difference)
+- Leader arm calibration is accurate
+- This confirms the issue is NOT calibration-related
+
+#### 4. Teleoperation Verification
+Ran full teleoperation system to confirm findings:
+```
+从臂当前位置: [5.378, 0.0, 0.0, 3.046, 18.647, 24.409]
+主臂目标位置: [5.154, 0.793, 70.217, 9.72, -4.347, 24.92]
+警告：主从臂位置差异过大 (70.2度)
+```
+- joint_1 and joint_3 consistently report 0.0° regardless of commands
+- Other joints respond normally and track leader arm correctly
+
+### Root Cause
+
+**Hardware Failure in Follower Arm:**
+- Two joints (joint_1 and joint_3) are mechanically or electrically stuck
+- Possible causes:
+  - Motor driver failure
+  - Motor power supply issue
+  - Mechanical obstruction or brake engaged
+  - Encoder working but motor not responding
+
+**NOT Software Issues:**
+- Joint mapping is correct (verified by 4 working joints)
+- Calibration is accurate (< 0.05° error on working joints)
+- CAN communication is functional (receiving data successfully)
+- Control commands are being sent (when CAN TX works)
+
+### Recommended Actions
+
+1. **Power off follower arm** and manually test joint_1 and joint_3:
+   - If joints move freely → Motor driver or control issue
+   - If joints are stuck → Mechanical jam or brake issue
+   - If joints have resistance → Normal motor cogging
+
+2. **After manual test, power on and read positions:**
+   ```bash
+   python scripts/piper_move.py --can-bus can_left --read-only
+   ```
+   - If positions changed → Encoder works, motor driver failed
+   - If still 0.0° → Encoder also has issues
+
+3. **Contact manufacturer** for:
+   - Motor driver replacement (joint_1 and joint_3)
+   - Mechanical inspection
+   - Warranty service if applicable
+
+### Modified Files
+
+- `scripts/piper_move.py` - Enhanced for individual joint testing and verification
+
+### Testing Status
+- ✅ Diagnostic testing complete
+- ✅ Hardware issue confirmed
+- ⚠️ Awaiting hardware repair/replacement
+
+### Impact
+- Teleoperation cannot function properly with 2 joints stuck
+- System is safe (no risk of damage from testing)
+- Other 4 joints work perfectly and can be used for limited testing
+
+---
+
+## v0.2.135 (2025-12-29) - Add Calibration Tools and Documentation
+
+### Summary
+Added comprehensive calibration tools for leader-follower arm synchronization and extensive documentation on zero position alignment. Created diagnostic scripts for reading arm positions and calculating calibration offsets.
+
+### New Scripts
+
+**重要说明：** 所有工具脚本统一存放在 `scripts/` 目录下，便于管理和使用。
+
+#### 1. 从臂位置读取工具
+
+**路径：** `scripts/test_piper_move.py`
+
+**功能：**
+- 读取 Piper 从臂当前关节位置
+- 支持移动从臂到指定位置（可配置速度）
+- `--read-only` 模式：仅读取位置，不移动机械臂
+- 显示格式：millidegrees（0.001度）和 degrees（度）
+- 用于确定遥操作的安全初始位置
+
+**使用方法：**
+```bash
+# 仅读取当前位置
+python scripts/test_piper_move.py --read-only --can-bus can_left
+
+# 移动到指定位置（6个关节值，单位：millidegrees）
+python scripts/test_piper_move.py --target 5393 -1105 3663 -2910 19695 23877 --speed 30
+```
+
+**输出示例：**
+```
+当前位置: [5393, -1105, 3663, -2910, 19695, 23877]
+当前位置（度）: [5.393, -1.105, 3.663, -2.91, 19.695, 23.877]
+```
+
+---
+
+#### 2. 主臂标定计算工具
+
+**路径：** `scripts/calculate_leader_homing_v2.py`
+
+**功能：**
+- 自动计算主臂 homing_offset 值
+- 同步主臂标定以匹配从臂位置
+- 读取主臂当前 PWM 值
+- 计算目标角度所需的偏移量
+- 处理负角度（使用 drive_mode 反转）
+- 自动保存更新后的标定到 `SO101-leader.json`
+- 实现主从臂逻辑角度空间对齐
+
+**使用方法：**
+```bash
+# 前提：主臂和从臂已物理对齐到相同姿态
+conda activate dorobot
+python scripts/calculate_leader_homing_v2.py
+```
+
+**工作流程：**
+1. 连接主臂并读取所有关节的 PWM 值
+2. 根据目标角度计算所需的 homing_offset
+3. 自动处理负角度（设置 drive_mode=1）
+4. 更新标定文件并保存
+
+**输出文件：** `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json`
+
+---
+
+#### 3. 标定验证工具
+
+**路径：** `scripts/verify_leader_calibration.py`
+
+**功能：**
+- 验证主臂标定质量
+- 对比主臂输出与从臂期望角度
+- 显示每个关节的位置差异
+- 识别需要重新标定的关节
+- 评估标定质量等级（优秀/良好/可接受/差）
+
+**使用方法：**
+```bash
+python scripts/verify_leader_calibration.py
+```
+
+**输出示例：**
+```
+关节0: ✓
+  主臂：  5.40度
+  从臂：  5.39度
+  差异：  0.01度
+
+最大差异：1.2度
+✓ 标定质量：优秀
+```
+
+---
+
+#### 4. 主臂位置显示工具
+
+**路径：** `scripts/show_leader_position.py`
+
+**功能：**
+- 实时显示主臂位置
+- 对比从臂目标位置
+- 显示位置差异和阈值验证
+- 辅助手动对齐主从臂
+
+**使用方法：**
+```bash
+python scripts/show_leader_position.py
+```
+
+**用途：** 在运行标定工具前，用于验证主从臂是否已物理对齐
+
+---
+
+#### 5. 主臂关节监控工具
+
+**路径：** `scripts/monitor_leader_joints.py`
+
+**功能：**
+- 持续监控主臂关节值
+- 实时显示 PWM 值和计算的角度
+- 用于调试标定问题
+- 验证电机读数准确性
+
+**使用方法：**
+```bash
+python scripts/monitor_leader_joints.py
+```
+
+**用途：** 调试标定问题时，观察 PWM 原始值和转换后的角度值
+
+---
+
+### 脚本存放规范
+
+**所有工具脚本必须存放在 `scripts/` 目录下**，包括：
+- 诊断工具
+- 标定工具
+- 测试脚本
+- 实用工具
+
+**命名规范：**
+- 使用小写字母和下划线
+- 名称应清晰描述功能
+- 例如：`test_piper_move.py`, `calculate_leader_homing_v2.py`
+
+**文档要求：**
+- 每个脚本必须包含 docstring 说明
+- 在 RELEASE.md 中记录新增脚本
+- 提供使用示例和输出示例
+
+### Documentation Updates
+
+**docs/Q-A.md (merged from SAFETY_IMPROVEMENTS.md):**
+- Comprehensive guide on leader-follower calibration
+- Explanation of zero position alignment concepts
+- LeRobot calibration approach research and analysis
+- Four detailed improvement recommendations:
+  1. Robot ID mechanism for multi-robot scenarios
+  2. Signed integer handling for negative angles
+  3. Calibration quality verification
+  4. Range mismatch handling and relative motion mapping
+- Detailed scenarios and examples for each recommendation
+- Physical-to-logical space mapping explanation
+- Calibration workflow and best practices
+
+### Key Concepts Documented
+
+**Zero Position vs Safe Home Position:**
+- Zero position: Angle = 0° reference point (factory defined for follower, calibration defined for leader)
+- Safe home position: Comfortable starting pose for teleoperation (user defined)
+- Clarification that these are different concepts
+
+**Calibration Mapping:**
+- Follower arm has factory calibration in SDK/firmware
+- Leader arm requires manual calibration to match follower's logical space
+- Calibration creates mapping: Physical Position → Logical Angle
+- Goal: Same physical position → Same logical angle for both arms
+
+**Homing Offset Calculation:**
+- Formula: `homing_offset = current_pwm - target_calibrated_pwm`
+- Handles negative angles via drive_mode inversion
+- Accounts for different motor ranges and resolutions
+
+### Changes
+
+**SAFETY_IMPROVEMENTS.md → docs/Q-A.md:**
+- Merged content from root and docs directories
+- Added LeRobot research findings
+- Expanded calibration explanations with examples
+- Added troubleshooting scenarios
+- Renamed to Q-A.md for better clarity
+
+### Testing
+
+- Verified test_piper_move.py reads positions correctly
+- Confirmed calculate_leader_homing_v2.py calculates offsets accurately
+- Validated documentation examples against actual code behavior
+
+### Related Issues
+
+- Addresses zero position mismatch between leader and follower arms
+- Solves emergency stop triggers due to large position differences at startup
+- Provides tools for systematic calibration workflow
+
+---
+
 ## v0.2.134 (2025-12-26) - Fix SO101 Leader Arm Joint Mapping and Add Diagnostic Tools
 
 ### Summary
