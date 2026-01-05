@@ -4,6 +4,128 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.138 (2026-01-05) - Camera Configuration & Path Standardization
+
+### Summary
+Fixed camera device paths to use recommended video nodes, standardized data storage paths to project directory, and improved inference script with proper conda environment activation and Piper arm support.
+
+### Changes
+
+#### 1. Camera Device Path Configuration
+**File:** `scripts/detect_cameras.sh`
+
+**Changes:**
+- Line 66-67: Fixed CAMERA_WRIST_PATH to use RealSense recommended path `/dev/video4`
+- Line 73: Fixed CAMERA_TOP_PATH to use Orbbec recommended path `/dev/video12`
+- Added REALSENSE_COLOR_DEVICE configuration
+
+**Impact:**
+- Cameras now use stable, recommended video device nodes
+- Eliminates device path conflicts
+- Ensures consistent camera detection across reboots
+
+#### 2. Data Storage Path Standardization
+**File:** `operating_platform/utils/constants.py`
+
+**Changes:**
+- Lines 24-26: Modified DOROBOT_HOME to use project root directory instead of `~/DoRobot`
+- Added PROJECT_ROOT calculation using `Path(__file__).parent.parent.parent.resolve()`
+
+**New Behavior:**
+- Training data saved to: `/path/to/DoRobot/dataset/{repo_id}/`
+- Data and code now colocated in same project directory
+- Portable across different installations
+
+#### 3. Inference Script Improvements
+**File:** `scripts/run_so101_inference.sh`
+
+**Changes:**
+- Lines 34-83: Added conda environment initialization and activation
+- Lines 118-119: Updated default paths to use `$PROJECT_ROOT/dataset/`
+  - Dataset: `$PROJECT_ROOT/dataset/so101-test`
+  - Model: `$PROJECT_ROOT/dataset/model`
+
+**Impact:**
+- Inference script now properly activates dorobot conda environment
+- Fixes ModuleNotFoundError for cv2, zmq, pyarrow
+- Consistent path structure with training pipeline
+
+#### 4. Inference Dataflow Configuration Fix
+**File:** `operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml`
+
+**Changes:**
+- Line 51: Changed follower arm component from `arm_normal_so101_v1` to `arm_normal_piper_v2`
+- Lines 57-59: Updated environment variables to use `CAN_BUS` instead of `PORT`
+
+**Impact:**
+- Inference mode now supports Piper follower arm with CAN bus
+- Fixes "Could not connect on port 'can_left'" error
+- Consistent arm configuration between teleoperation and inference modes
+
+### Testing Results
+
+**Camera Integration Test:**
+- ✅ RealSense camera (/dev/video4) - Successfully initialized
+- ✅ Orbbec camera (/dev/video12) - Successfully initialized
+- ✅ Captured 2377 frames in test episode
+- ✅ Video encoding successful (2 videos, MP4 format)
+- ✅ Data saved to project directory
+
+**Inference Mode Test:**
+- ✅ Conda environment activation successful
+- ✅ Camera data stream connected
+- ✅ Piper follower arm connected via CAN bus
+- ✅ ZeroMQ sockets initialized
+- ✅ All hardware ready for inference (pending trained model)
+
+### Configuration Files
+
+**Device Configuration:** `~/.dorobot_device.conf`
+```bash
+CAMERA_TOP_PATH="/dev/video12"      # Orbbec Gemini 335
+CAMERA_WRIST_PATH="/dev/video4"     # RealSense Depth Camera 405
+ARM_LEADER_PORT="/dev/ttyUSB0"      # SO101 Leader (Zhonglin)
+ARM_FOLLOWER_PORT="can_left"        # Piper Follower (CAN bus)
+```
+
+### Directory Structure
+```
+/path/to/DoRobot/
+├── scripts/
+│   ├── detect_cameras.sh          # Camera detection with fixed paths
+│   ├── run_so101.sh               # Teleoperation data collection
+│   └── run_so101_inference.sh     # Inference with conda support
+├── dataset/                        # New: Project-local data storage
+│   ├── so101-test/                # Training datasets
+│   └── model/                     # Trained models
+└── operating_platform/
+    └── ...
+```
+
+### Migration Notes
+
+**For Existing Installations:**
+1. Data previously saved to `~/DoRobot/dataset/` will remain there
+2. New data will be saved to project directory `./dataset/`
+3. To use old data, either:
+   - Copy to new location: `cp -r ~/DoRobot/dataset/* ./dataset/`
+   - Or set environment variable: `export DOROBOT_HOME=~/DoRobot`
+
+**For Inference:**
+1. Place trained models in `./dataset/model/`
+2. Ensure model files include:
+   - `config.json`
+   - `model.safetensors`
+   - `train_config.json`
+
+### Known Issues
+
+- Model files in `./dataset/model/` are currently empty (0 bytes)
+- Inference requires valid trained model to proceed
+- CAN bus device warning "Device not found: can_left" appears but doesn't affect operation
+
+---
+
 ## v0.2.137 (2025-12-30) - Pose Mapping Baseline System for Teleoperation
 
 ### Summary

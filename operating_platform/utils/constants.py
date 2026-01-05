@@ -21,7 +21,9 @@ OPTIMIZER_STATE = "optimizer_state.safetensors"
 OPTIMIZER_PARAM_GROUPS = "optimizer_param_groups.json"
 SCHEDULER_STATE = "scheduler_state.json"
 
-DOROBOT_HOME = Path(os.getenv("DOROBOT_HOME", "~/DoRobot")).expanduser().resolve()
+# 获取项目根目录（constants.py 的上上级目录，即 DoRobot 项目根目录）
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+DOROBOT_HOME = Path(os.getenv("DOROBOT_HOME", str(PROJECT_ROOT))).expanduser().resolve()
 
 
 if "DOROBOT_HOME" not in os.environ:

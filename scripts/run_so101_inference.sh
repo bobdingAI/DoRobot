@@ -31,11 +31,56 @@
 
 set -e
 
+# Configuration
+CONDA_ENV="${CONDA_ENV:-dorobot}"
+
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DORA_DIR="$PROJECT_ROOT/operating_platform/robot/robots/so101_v1"
 DORA_GRAPH="dora_control_dataflow.yml"
+
+# =============================================================================
+# Initialize conda environment
+# =============================================================================
+init_conda() {
+    # Find conda installation
+    if [ -n "$CONDA_EXE" ]; then
+        CONDA_BASE="$(dirname "$(dirname "$CONDA_EXE")")"
+    elif [ -d "$HOME/miniconda3" ]; then
+        CONDA_BASE="$HOME/miniconda3"
+    elif [ -d "$HOME/anaconda3" ]; then
+        CONDA_BASE="$HOME/anaconda3"
+    elif [ -d "/opt/conda" ]; then
+        CONDA_BASE="/opt/conda"
+    else
+        echo "[ERROR] Cannot find conda installation"
+        exit 1
+    fi
+
+    # Source conda.sh to enable conda activate
+    if [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+        source "$CONDA_BASE/etc/profile.d/conda.sh"
+    else
+        echo "[ERROR] Cannot find conda.sh"
+        exit 1
+    fi
+}
+
+# Activate conda environment
+activate_env() {
+    local env_name="$1"
+    if ! conda env list | grep -q "^${env_name} "; then
+        echo "[ERROR] Conda environment '$env_name' does not exist"
+        exit 1
+    fi
+    conda activate "$env_name"
+    echo "[INFO] Activated conda environment: $env_name"
+}
+
+echo "[INFO] Initializing conda environment..."
+init_conda
+activate_env "$CONDA_ENV"
 
 # =============================================================================
 # LOAD CONFIG FILE (same as run_so101.sh for consistency)
@@ -70,8 +115,8 @@ export ARM_FOLLOWER_PORT
 
 # Script arguments
 REPO_ID="${REPO_ID:-so101-test}"
-DATASET_PATH="${1:-$HOME/DoRobot/dataset/$REPO_ID}"
-MODEL_PATH="${2:-$HOME/DoRobot/model}"
+DATASET_PATH="${1:-$PROJECT_ROOT/dataset/$REPO_ID}"
+MODEL_PATH="${2:-$PROJECT_ROOT/dataset/model}"
 SINGLE_TASK="${3:-${SINGLE_TASK:-Perform the trained task.}}"
 
 echo "=================================================="

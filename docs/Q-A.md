@@ -1,9 +1,12 @@
 # DoRobot Q&A 文档
 
-**最后更新：** 2025-12-29
+**最后更新：** 2026-01-05
 **维护者：** DoRobot Team
 
 本文档整合了以下内容：
+- 摄像头配置和图像数据接入
+- 推理模式从臂连接问题
+- 数据存储路径配置
 - Piper从臂安全改进和故障排查
 - 主从臂标定对齐问题和解决方案
 - LeRobot零点位置解决方案研究
@@ -17,6 +20,7 @@
 
 | 日期 | 内容 | 对应版本 |
 |------|------|----------|
+| 2026-01-05 | 摄像头配置、路径标准化、推理脚本改进 | [v0.2.138](RELEASE.md#v0.2.138) |
 | 2025-12-30 | 姿态映射基准系统 | [v0.2.137](RELEASE.md#v0.2.137) |
 | 2025-12-29 | 从臂硬件故障诊断 | [v0.2.136](RELEASE.md#v0.2.136) |
 | 2025-12-29 | LeRobot研究、标定工具、Q&A整合 | [v0.2.135](RELEASE.md#v0.2.135) |
@@ -25,7 +29,240 @@
 
 ---
 
-# 第零部分：姿态映射基准系统
+# 第零部分：摄像头配置与推理模式问题
+
+**对应版本：** [v0.2.138](RELEASE.md#v0.2.138)
+
+---
+
+## 问题1：摄像头设备路径配置
+
+### 症状描述
+
+**现象：**
+- 需要为 RealSense 和 Orbbec 摄像头配置固定的视频设备节点
+- CAMERA_WRIST_PATH 应使用 RealSense 推荐的 /dev/video4
+- CAMERA_TOP_PATH 应使用 Orbbec 推荐的 /dev/video12
+
+### 解决方案
+
+**修改文件：** `scripts/detect_cameras.sh`
+
+**修改内容：**
+```bash
+# RealSense 摄像头配置（第66-67行）
+if echo "$INFO" | grep -q "YUV 彩色流"; then
+    echo "CAMERA_WRIST_PATH=/dev/video4" >> "$CONFIG_FILE"
+    echo "REALSENSE_COLOR_DEVICE=/dev/video4" >> "$CONFIG_FILE"
+fi
+
+# Orbbec 摄像头配置（第73行）
+if echo "$INFO" | grep -q "YUV 彩色流"; then
+    echo "CAMERA_TOP_PATH=/dev/video12" >> "$CONFIG_FILE"
+fi
+```
+
+**测试结果：**
+- ✅ RealSense 摄像头成功初���化（/dev/video4）
+- ✅ Orbbec 摄像头成功初始化（/dev/video12）
+- ✅ 采集 2377 帧测试数据成功
+- ✅ 视频编码成功（2个 MP4 视频）
+
+---
+
+## 问题2：推理模式从臂连接失败
+
+### 症状描述
+
+**现象：**
+- 运行 `bash scripts/run_so101_inference.sh` 时报错
+- 错误信息：`Could not connect on port 'can_left'`
+- 从臂使用 Piper（CAN 总线），但推理模式使用了错误的组件
+
+**根本原因：**
+- 推理模式的 dataflow 配置使用了 `arm_normal_so101_v1` 组件（串口）
+- 应该使用 `arm_normal_piper_v2` 组件（CAN 总线）
+- 遥操作模式使用正确的组件，但推理模式配置不一致
+
+### 解决方案
+
+**修改文件：** `operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml`
+
+**修改内容：**
+```yaml
+# 第50-59行：从臂配置
+- id: arm_so101_follower
+  path: ../../components/arm_normal_piper_v2/main.py  # 改为 Piper 组件
+  inputs:
+    get_joint: dora/timer/millis/33
+    action_joint: so101_zeromq/action_joint
+  outputs:
+    - joint
+  env:
+    # 使用 CAN_BUS 而不是 PORT
+    CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
+```
+
+**测试结果：**
+- ✅ Piper 从臂成功连接（CAN 总线）
+- ✅ 从臂使能成功
+- ✅ 读取从臂位置成功
+- ✅ 所有硬件准备就绪
+
+---
+
+## 问题3：推理脚本缺少 conda 环境
+
+### 症状描述
+
+**现象：**
+- 运行推理脚本时报错：`ModuleNotFoundError: No module named 'cv2'`
+- 同时缺少 zmq、pyarrow 等模块
+- 脚本使用系统 Python (`/usr/bin/python3`) 而不是 conda 环境
+
+**根本原因：**
+- `run_so101_inference.sh` 没有激活 conda 环境
+- 遥操作脚本 `run_so101.sh` 有 conda 激活逻辑，但推理脚本缺失
+
+### 解决方案
+
+**修改文件：** `scripts/run_so101_inference.sh`
+
+**添加内容（第34-83行）：**
+```bash
+# Configuration
+CONDA_ENV="${CONDA_ENV:-dorobot}"
+
+# Initialize conda environment
+init_conda() {
+    # Find conda installation
+    if [ -n "$CONDA_EXE" ]; then
+        CONDA_BASE="$(dirname "$(dirname "$CONDA_EXE")")"
+    elif [ -d "$HOME/miniconda3" ]; then
+        CONDA_BASE="$HOME/miniconda3"
+    elif [ -d "$HOME/anaconda3" ]; then
+        CONDA_BASE="$HOME/anaconda3"
+    elif [ -d "/opt/conda" ]; then
+        CONDA_BASE="/opt/conda"
+    else
+        echo "[ERROR] Cannot find conda installation"
+        exit 1
+    fi
+
+    # Source conda.sh to enable conda activate
+    if [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+        source "$CONDA_BASE/etc/profile.d/conda.sh"
+    else
+        echo "[ERROR] Cannot find conda.sh"
+        exit 1
+    fi
+}
+
+# Activate conda environment
+activate_env() {
+    local env_name="$1"
+    if ! conda env list | grep -q "^${env_name} "; then
+        echo "[ERROR] Conda environment '$env_name' does not exist"
+        exit 1
+    fi
+    conda activate "$env_name"
+    echo "[INFO] Activated conda environment: $env_name"
+}
+
+echo "[INFO] Initializing conda environment..."
+init_conda
+activate_env "$CONDA_ENV"
+```
+
+**测试结果：**
+- ✅ Conda 环境成功激活
+- ✅ 所有 Python 模块可用
+- ✅ 推理脚本正常启动
+
+---
+
+## 问题4：数据存储路径配置
+
+### 症状描述
+
+**需求：**
+- 将数据保存路径从 `~/DoRobot/dataset/` 改为项目目录下的 `./dataset/`
+- 将模型路径从 `~/DoRobot/model` 改为 `./dataset/model`
+- 使数据和代码在同一项目目录下，便于管理
+
+### 解决方案
+
+**修改文件1：** `operating_platform/utils/constants.py`
+
+**修改内容（第24-26行）：**
+```python
+# 获取项目根目录（constants.py 的上上级目录）
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+DOROBOT_HOME = Path(os.getenv("DOROBOT_HOME", str(PROJECT_ROOT))).expanduser().resolve()
+```
+
+**修改文件2：** `scripts/run_so101_inference.sh`
+
+**修改内容（第118-119行）：**
+```bash
+DATASET_PATH="${1:-$PROJECT_ROOT/dataset/$REPO_ID}"
+MODEL_PATH="${2:-$PROJECT_ROOT/dataset/model}"
+```
+
+**新的目录结构：**
+```
+/path/to/DoRobot/
+├── scripts/
+├── dataset/              # 新位置
+│   ├── so101-test/      # 训练数据
+│   └── model/           # 模型文件
+└── operating_platform/
+```
+
+**迁移说明：**
+- 旧数据位置：`~/DoRobot/dataset/`
+- 新数据位置：`./dataset/`
+- 如需使用旧数据：`cp -r ~/DoRobot/dataset/* ./dataset/`
+- 或设置环境变量：`export DOROBOT_HOME=~/DoRobot`
+
+---
+
+## 快速参考：设备配置
+
+**配置文件位置：** `~/.dorobot_device.conf`
+
+**推荐配置：**
+```bash
+# 摄像头
+CAMERA_TOP_PATH="/dev/video12"      # Orbbec Gemini 335
+CAMERA_WRIST_PATH="/dev/video4"     # RealSense Depth Camera 405
+
+# 机械臂
+ARM_LEADER_PORT="/dev/ttyUSB0"      # SO101 Leader (Zhonglin)
+ARM_FOLLOWER_PORT="can_left"        # Piper Follower (CAN bus)
+```
+
+**生成配置：**
+```bash
+# 自动检测并生成配置
+bash scripts/detect.sh
+
+# 或手动运行
+python scripts/detect_usb_ports.py --save --chmod
+```
+
+**测试配置：**
+```bash
+# 测试遥操作（数据采集）
+bash scripts/run_so101.sh
+
+# 测试推理
+bash scripts/run_so101_inference.sh
+```
+
+---
+
+# 第一部分：姿态映射基准系统
 
 **对应版本：** [v0.2.137](RELEASE.md#v0.2.137)
 

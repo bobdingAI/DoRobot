@@ -48,19 +48,15 @@ nodes:
       IMAGE_HEIGHT: 480
 
   - id: arm_so101_follower
-    path: ../../components/arm_normal_so101_v1/main.py
+    path: ../../components/arm_normal_piper_v2/main.py
     inputs:
       get_joint: dora/timer/millis/33
       action_joint: so101_zeromq/action_joint
     outputs:
       - joint
     env:
-      GET_DEVICE_FROM: PORT
-      # Same env var as teleoperate dataflow for consistency
-      PORT: $ARM_FOLLOWER_PORT
-      ARM_NAME: SO101-follower
-      ARM_ROLE: follower
-      CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
+      # Use CAN_BUS for Piper arm (same as teleoperate dataflow)
+      CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
 
   - id: so101_zeromq
     path: dora_zeromq.py
