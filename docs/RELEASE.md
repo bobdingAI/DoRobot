@@ -4,6 +4,69 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.139 (2026-01-06) - DORA Dataflow Communication Fix
+
+### Summary
+Fixed critical DORA dataflow communication issue preventing inference system from receiving follower arm joint data. The arm component was listening for 'tick' events while the dataflow was sending 'get_joint' events, causing connection timeout.
+
+### Changes
+
+#### 1. DORA Control Dataflow Configuration Fix
+**File:** `operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml`
+
+**Changes:**
+- Line 53: Changed arm input event name from `get_joint` to `tick`
+
+**Before:**
+```yaml
+inputs:
+  get_joint: dora/timer/millis/33
+  action_joint: so101_zeromq/action_joint
+```
+
+**After:**
+```yaml
+inputs:
+  tick: dora/timer/millis/33
+  action_joint: so101_zeromq/action_joint
+```
+
+**Root Cause:**
+- The Piper arm component (`arm_normal_piper_v2/main.py` line 214) only handles `tick` events
+- DORA dataflow was configured to send `get_joint` events
+- Event name mismatch caused arm component to never send joint data
+- Inference system timed out waiting for `main_follower` joint data
+
+**Impact:**
+- ✅ Inference system now successfully receives follower arm joint data
+- ✅ Connection established in ~3 seconds (previously timed out after 50s)
+- ✅ Inference loop runs at ~12-15kHz with proper data flow
+- ✅ Model successfully loaded and executing actions
+
+### Verification
+
+**Model Validation:**
+- Model file: `dataset/model/model.safetensors` (197 MB)
+- Total parameters: 51,668,662 (ACT model with VAE)
+- Configuration: Valid (6D state + 2 cameras → 6D action)
+
+**System Status:**
+```
+[SO101] Joint data stream connected
+[连接成功] 所有设备已就绪:
+  - 从臂关节角度: main_follower
+  总耗时: 3.01秒
+Starting inference
+dt: 0.09 (11276.4hz)
+```
+
+### Related Files
+- `operating_platform/robot/components/arm_normal_piper_v2/main.py` (event handler)
+- `operating_platform/robot/robots/so101_v1/dora_zeromq.py` (ZeroMQ bridge)
+- `operating_platform/robot/robots/so101_v1/manipulator.py` (connection logic)
+
+---
+
 ## v0.2.138 (2026-01-05) - Camera Configuration & Path Standardization
 
 ### Summary

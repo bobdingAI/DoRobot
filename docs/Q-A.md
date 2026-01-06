@@ -1,9 +1,11 @@
 # DoRobot Q&A 文档
 
-**最后更新：** 2026-01-05
+**最后更新：** 2026-01-06
 **维护者：** DoRobot Team
 
 本文档整合了以下内容：
+- DORA 数据流通信问题诊断与修复
+- 推理系统模型加载与验证
 - 摄像头配置和图像数据接入
 - 推理模式从臂连接问题
 - 数据存储路径配置
@@ -20,16 +22,230 @@
 
 | 日期 | 内容 | 对应版本 |
 |------|------|----------|
+| 2026-01-06 | DORA 数据流通信修复、推理系统诊断 | [v0.2.139](RELEASE.md#v0.2.139) |
 | 2026-01-05 | 摄像头配置、路径标准化、推理脚本改进 | [v0.2.138](RELEASE.md#v0.2.138) |
 | 2025-12-30 | 姿态映射基准系统 | [v0.2.137](RELEASE.md#v0.2.137) |
 | 2025-12-29 | 从臂硬件故障诊断 | [v0.2.136](RELEASE.md#v0.2.136) |
 | 2025-12-29 | LeRobot研究、标定工具、Q&A整合 | [v0.2.135](RELEASE.md#v0.2.135) |
-| 2025-12-26 | 关节映射修复、电机配置、诊断工具 | [v0.2.134](RELEASE.md#v0.2.134) |
+| 2025-12-26 | 关节映射修复、电机配置、诊断工�� | [v0.2.134](RELEASE.md#v0.2.134) |
 | 2025-12-25 | 主从臂标定对齐、安全保护机制 | [v0.2.132](RELEASE.md#v0.2.132), [v0.2.133](RELEASE.md#v0.2.133) |
 
 ---
 
-# 第零部分：摄像头配置与推理模式问题
+# 第零部分：DORA 数据流通信问题
+
+**对应版本：** [v0.2.139](RELEASE.md#v0.2.139)
+
+---
+
+## 问题1：推理系统无法接收从臂关节数据
+
+### 症状描述
+
+**现象：**
+```
+TimeoutError: 连接超时，未满足的条件: 等待从臂关节角度超时: 未收到 [main_follower]; 已收到 []
+```
+
+**表现：**
+- 推理系统启动后，DORA 节点正常初始化
+- 相机数据流连接成功
+- 从臂使能成功，读取到安全位置
+- 但推理系统一直等待从臂关节数据，最终超时（50秒）
+
+### 根本原因
+
+**事件名称不匹配：**
+
+1. **DORA 配置** (`dora_control_dataflow.yml` line 53)：
+   ```yaml
+   inputs:
+     get_joint: dora/timer/millis/33  # 发送 get_joint 事件
+   ```
+
+2. **机械臂组件** (`arm_normal_piper_v2/main.py` line 214)：
+   ```python
+   elif event["id"] == "tick":  # 只处理 tick 事件
+       # 读取关节数据并发送
+   ```
+
+3. **结果**：
+   - 机械臂组件收不到触发信号
+   - 不会发送关节数据到 `joint` 输出
+   - ZeroMQ 桥接收不到 `main_follower_joint` 数据
+   - 推理系统超时
+
+### 解决方案
+
+**修改文件：** `operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml`
+
+**修改内容：**
+```yaml
+# 修改前
+inputs:
+  get_joint: dora/timer/millis/33
+  action_joint: so101_zeromq/action_joint
+
+# 修改后
+inputs:
+  tick: dora/timer/millis/33
+  action_joint: so101_zeromq/action_joint
+```
+
+**修改位置：** Line 53
+
+### 数据流架构说明
+
+**完整数据流：**
+```
+定时器 (33ms)
+  → DORA: tick 事件
+  → arm_so101_follower 组件
+  → 读取关节角度
+  → 输出: joint
+  → DORA: main_follower_joint
+  → so101_zeromq 组件
+  → ZeroMQ IPC: /tmp/dora-zeromq-so101-joint
+  → 推理系统 (manipulator.py)
+  → recv_joint['main_follower_joint']
+```
+
+**关键组件：**
+1. **arm_normal_piper_v2/main.py**: 处理 `tick` 事件，读取并发送关节数据
+2. **dora_zeromq.py**: ZeroMQ 桥接，转发 DORA 事件到推理系统
+3. **manipulator.py**: 推理系统，接收关节数据并执行推理
+
+### 验证步骤
+
+1. **检查 DORA 配置**：
+   ```bash
+   grep -A 3 "arm_so101_follower" operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml
+   ```
+   应该看到 `tick: dora/timer/millis/33`
+
+2. **运行推理系统**：
+   ```bash
+   bash scripts/run_so101_inference.sh
+   ```
+
+3. **验证成功标志**：
+   ```
+   [SO101] Joint data stream connected
+   [连接成功] 所有设备已就绪:
+     - 从臂关节角度: main_follower
+     总耗时: 3.01秒
+   Starting inference
+   dt: 0.09 (11276.4hz)
+   ```
+
+### 相关问题排查
+
+**如果仍然超时，检查：**
+
+1. **机械臂连接**：
+   ```bash
+   # 检查 CAN 总线
+   ip link show can_left
+   ```
+
+2. **DORA 进程**：
+   ```bash
+   ps aux | grep -E "dora|arm_normal_piper"
+   ```
+
+3. **ZeroMQ IPC 文件**：
+   ```bash
+   ls -la /tmp/dora-zeromq-so101-*
+   ```
+
+4. **清理遗留进程**：
+   ```bash
+   pkill -9 -f "arm_normal_piper_v2/main.py"
+   pkill -9 -f "dora_zeromq.py"
+   rm -f /tmp/dora-zeromq-so101-*
+   ```
+
+---
+
+## 问题2：如何验证训练模型的完整性
+
+### 症状描述
+
+**需求：**
+- 验证训练好的模型文件是否完整
+- 确认模型参数量和配置正确
+- 确保模型可以被推理系统加载
+
+### 验证方法
+
+**1. 检查模型文件**：
+```bash
+ls -lh dataset/model/
+# 应该看到：
+# config.json (1.6K)
+# model.safetensors (197M)
+# train_config.json (4.7K)
+```
+
+**2. 验证模型权重**：
+```python
+from safetensors.torch import load_file
+import json
+
+# 检查配置
+with open('dataset/model/config.json', 'r') as f:
+    config = json.load(f)
+print(f"模型类型: {config['type']}")
+print(f"输入特征: {list(config['input_features'].keys())}")
+print(f"输出特征: {list(config['output_features'].keys())}")
+
+# 检查权重
+state_dict = load_file('dataset/model/model.safetensors')
+print(f"参数数量: {len(state_dict)}")
+total_params = sum(p.numel() for p in state_dict.values())
+print(f"总参数量: {total_params:,}")
+```
+
+**3. 预期输出**：
+```
+模型类型: act
+输入特征: ['observation.state', 'observation.images.image_top', 'observation.images.image_wrist']
+输出特征: ['action']
+参数数量: 244
+总参数量: 51,668,662
+```
+
+### 模型规格
+
+**ACT (Action Chunking Transformer) 模型：**
+- **类型**: act
+- **总参数**: 51,668,662 (约 5170 万)
+- **文件大小**: 197 MB
+- **输入**:
+  - `observation.state`: 6D 关节角度
+  - `observation.images.image_top`: 3×480×640 顶部相机
+  - `observation.images.image_wrist`: 3×480×640 手腕相机
+- **输出**:
+  - `action`: 6D 关节动作
+- **架构**:
+  - Vision backbone: ResNet18
+  - Encoder layers: 4
+  - Decoder layers: 1
+  - VAE: 启用 (latent_dim=32)
+  - Chunk size: 100
+  - Action steps: 100
+
+### 常见问题
+
+**Q: 模型文件损坏如何判断？**
+A: 使用 safetensors 加载会抛出异常。正常加载说明文件完整。
+
+**Q: 推理系统报 policy_path: None？**
+A: 检查 `scripts/run_so101_inference.sh` 中的 `--policy.path` 参数是否正确传递。
+
+---
+
+# 第一部分：摄像头配置与推理模式问题
 
 **对应版本：** [v0.2.138](RELEASE.md#v0.2.138)
 

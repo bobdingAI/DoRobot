@@ -50,7 +50,7 @@ nodes:
   - id: arm_so101_follower
     path: ../../components/arm_normal_piper_v2/main.py
     inputs:
-      get_joint: dora/timer/millis/33
+      tick: dora/timer/millis/33
       action_joint: so101_zeromq/action_joint
     outputs:
       - joint
