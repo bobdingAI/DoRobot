@@ -72,6 +72,7 @@ nodes:
       PORT: ${ARM_LEADER_PORT:-/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0}
       ARM_NAME: SO101-leader
       ARM_ROLE: leader
+      MOTOR_PROTOCOL: feetech
       CALIBRATION_DIR: ../../components/arm_normal_so101_v1/.calibration/
 
   - id: arm_so101_follower
@@ -83,7 +84,7 @@ nodes:
     outputs:
       - joint
     env:
-      CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
+      CAN_BUS: can_left
 
   # - id: arm_so101_leader2
   #   path: ../../components/arm_normal_so101_v1/main.py

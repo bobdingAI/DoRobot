@@ -545,12 +545,13 @@ class SO101RobotConfig(ManipulatorRobotConfig):
                 port="/dev/ttyACM0",
                 motors={
                     # name: (index, model)
-                    "joint_shoulder_pan": [1, "sts3215"],
-                    "joint_shoulder_lift": [2, "sts3215"],
-                    "joint_elbow_flex": [3, "sts3215"],
-                    "joint_wrist_flex": [4, "sts3215"],
-                    "joint_wrist_roll": [5, "sts3215"],
-                    "joint_gripper": [6, "sts3215"],
+                    "joint_0": [0, "sts3215"],
+                    "joint_1": [1, "sts3215"],
+                    "joint_2": [2, "sts3215"],
+                    "joint_3": [3, "sts3215"],
+                    "joint_4": [4, "sts3215"],
+                    "joint_5": [5, "sts3215"],
+                    "gripper": [6, "sts3215"],
                 },
             ),
             # "second": FeetechMotorsBusConfig(
@@ -570,16 +571,17 @@ class SO101RobotConfig(ManipulatorRobotConfig):
 
     follower_arms: dict[str, MotorsBusConfig] = field(
         default_factory=lambda: {
-            "main": FeetechMotorsBusConfig(
-                port="/dev/ttyACM1",
+            "main": PiperMotorsBusConfig(
+                port="can_left",
                 motors={
                     # name: (index, model)
-                    "joint_shoulder_pan": [1, "sts3215"],
-                    "joint_shoulder_lift": [2, "sts3215"],
-                    "joint_elbow_flex": [3, "sts3215"],
-                    "joint_wrist_flex": [4, "sts3215"],
-                    "joint_wrist_roll": [5, "sts3215"],
-                    "joint_gripper": [6, "sts3215"],
+                    "joint_1": [1, "piper-motor"],
+                    "joint_2": [2, "piper-motor"],
+                    "joint_3": [3, "piper-motor"],
+                    "joint_4": [4, "piper-motor"],
+                    "joint_5": [5, "piper-motor"],
+                    "joint_6": [6, "piper-motor"],
+                    "gripper": [7, "piper-gripper"],
                 },
             ),
             # "second": FeetechMotorsBusConfig(

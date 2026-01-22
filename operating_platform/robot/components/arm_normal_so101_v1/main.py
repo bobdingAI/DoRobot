@@ -45,6 +45,7 @@ ARM_NAME = os.getenv("ARM_NAME", "SO101-Arm")
 CALIBRATION_DIR = os.getenv("CALIBRATION_DIR", "./.calibration/")
 USE_DEGRESS = os.getenv("USE_DEGRESS", "True")
 ARM_ROLE = os.getenv("ARM_ROLE", "follower")
+MOTOR_PROTOCOL = os.getenv("MOTOR_PROTOCOL", "auto")  # auto, feetech, zhonglin
 
 
 def env_to_bool(env_value: str, default: bool = True) -> bool:
@@ -107,12 +108,14 @@ def main():
 
     norm_mode_body = MotorNormMode.DEGREES if use_degrees else MotorNormMode.RANGE_M100_100
 
-    # Choose motor bus based on ARM_ROLE
-    # Leader arm uses Zhonglin ASCII protocol (ZP10D controller)
-    # Follower arm uses Feetech binary protocol
-    if ARM_ROLE == "leader":
-        # Leader arm outputs radians for Piper follower arm compatibility
-        # Joint naming matches follower arm: joint_0 through joint_5 + gripper
+    # Determine protocol: auto-detect based on ARM_ROLE, or use explicit MOTOR_PROTOCOL
+    use_protocol = MOTOR_PROTOCOL
+    if use_protocol == "auto":
+        use_protocol = "zhonglin" if ARM_ROLE == "leader" else "feetech"
+
+    # Choose motor bus based on protocol
+    if use_protocol == "zhonglin":
+        # Zhonglin ASCII protocol (ZP10D controller) - original SO101 leader arm
         arm_bus = ZhonglinMotorsBus(
             port=PORT,
             motors={
@@ -127,19 +130,40 @@ def main():
             calibration=arm_calibration,
             baudrate=115200,
         )
+    elif use_protocol == "feetech":
+        if ARM_ROLE == "leader":
+            # Feetech protocol leader arm (new configuration)
+            # Leader arm outputs radians for Piper follower arm compatibility
+            arm_bus = FeetechMotorsBus(
+                port=PORT,
+                motors={
+                    "joint_0": Motor(0, "sts3215", MotorNormMode.RADIANS),
+                    "joint_1": Motor(1, "sts3215", MotorNormMode.RADIANS),
+                    "joint_2": Motor(2, "sts3215", MotorNormMode.RADIANS),
+                    "joint_3": Motor(3, "sts3215", MotorNormMode.RADIANS),
+                    "joint_4": Motor(4, "sts3215", MotorNormMode.RADIANS),
+                    "joint_5": Motor(5, "sts3215", MotorNormMode.RADIANS),
+                    "gripper": Motor(6, "sts3215", MotorNormMode.RADIANS),
+                },
+                calibration=arm_calibration,
+            )
+        else:
+            # Feetech protocol follower arm (original configuration)
+            arm_bus = FeetechMotorsBus(
+                port=PORT,
+                motors={
+                    "joint_0": Motor(0, "sts3215", norm_mode_body),
+                    "joint_1": Motor(1, "sts3215", norm_mode_body),
+                    "joint_2": Motor(2, "sts3215", norm_mode_body),
+                    "joint_3": Motor(3, "sts3215", norm_mode_body),
+                    "joint_4": Motor(4, "sts3215", norm_mode_body),
+                    "joint_5": Motor(5, "sts3215", norm_mode_body),
+                    "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
+                },
+                calibration=arm_calibration,
+            )
     else:
-        arm_bus = FeetechMotorsBus(
-            port=PORT,
-            motors={
-                "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-                "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-                "elbow_flex": Motor(3, "sts3215", norm_mode_body),
-                "wrist_flex": Motor(4, "sts3215", norm_mode_body),
-                "wrist_roll": Motor(5, "sts3215", norm_mode_body),
-                "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-            },
-            calibration=arm_calibration,
-        )
+        raise ValueError(f"Unknown MOTOR_PROTOCOL: {use_protocol}. Use 'auto', 'feetech', or 'zhonglin'")
 
     arm_bus.connect()
     _arm_bus = arm_bus  # Store globally for cleanup
@@ -167,7 +191,7 @@ def main():
                 if ctrl_frame > 0:
                     continue
 
-                goal_pos = {key: position[motor.id - 1] for key, motor in arm_bus.motors.items()}
+                goal_pos = {key: position[motor.id] for key, motor in arm_bus.motors.items()}
                 arm_bus.sync_write("Goal_Position", goal_pos)
 
             if event["id"] == "action_joint_ctrl":
@@ -175,7 +199,7 @@ def main():
 
                 ctrl_frame = 200
 
-                goal_pos = {key: position[motor.id - 1] for key, motor in arm_bus.motors.items()}
+                goal_pos = {key: position[motor.id] for key, motor in arm_bus.motors.items()}
                 arm_bus.sync_write("Goal_Position", goal_pos)
 
             elif event["id"] == "get_joint":

@@ -798,7 +798,14 @@ class MotorsBus(abc.ABC):
             elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
                 mid = (min_ + max_) / 2
                 max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
-                normalized_values[id_] = (val - mid) * 360 / max_res
+                degrees = (val - mid) * 360 / max_res
+                normalized_values[id_] = -degrees if drive_mode else degrees
+            elif self.motors[motor].norm_mode is MotorNormMode.RADIANS:
+                mid = (min_ + max_) / 2
+                max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
+                import math
+                radians = (val - mid) * 2 * math.pi / max_res
+                normalized_values[id_] = -radians if drive_mode else radians
             else:
                 raise NotImplementedError
 
@@ -826,9 +833,16 @@ class MotorsBus(abc.ABC):
                 bounded_val = min(100.0, max(0.0, val))
                 unnormalized_values[id_] = int((bounded_val / 100) * (max_ - min_) + min_)
             elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
+                val = -val if drive_mode else val
                 mid = (min_ + max_) / 2
                 max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
                 unnormalized_values[id_] = int((val * max_res / 360) + mid)
+            elif self.motors[motor].norm_mode is MotorNormMode.RADIANS:
+                val = -val if drive_mode else val
+                mid = (min_ + max_) / 2
+                max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
+                import math
+                unnormalized_values[id_] = int((val * max_res / (2 * math.pi)) + mid)
             else:
                 raise NotImplementedError
 

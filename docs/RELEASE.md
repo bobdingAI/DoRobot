@@ -4,6 +4,169 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.142 (2026-01-22) - Feetech Leader Arm Support & Motor Protocol Refactoring
+
+### Summary
+Added support for Feetech protocol leader arm configuration, standardized joint naming conventions, and fixed motor ID indexing. This enables using Feetech STS3215 servos for both leader and follower arms, with flexible protocol selection via environment variables.
+
+### Key Changes
+
+#### 1. Flexible Motor Protocol Selection
+**File:** `operating_platform/robot/components/arm_normal_so101_v1/main.py`
+
+**New Feature:**
+- Added `MOTOR_PROTOCOL` environment variable with three options:
+  - `auto` (default): Automatically selects protocol based on ARM_ROLE (zhonglin for leader, feetech for follower)
+  - `feetech`: Explicitly use Feetech binary protocol
+  - `zhonglin`: Explicitly use Zhonglin ASCII protocol (ZP10D controller)
+
+**Implementation:**
+```python
+MOTOR_PROTOCOL = os.getenv("MOTOR_PROTOCOL", "auto")  # auto, feetech, zhonglin
+
+# Determine protocol: auto-detect based on ARM_ROLE, or use explicit MOTOR_PROTOCOL
+use_protocol = MOTOR_PROTOCOL
+if use_protocol == "auto":
+    use_protocol = "zhonglin" if ARM_ROLE == "leader" else "feetech"
+```
+
+**Benefits:**
+- Supports both original Zhonglin leader arm and new Feetech leader arm configurations
+- Allows explicit protocol override for testing and debugging
+- Maintains backward compatibility with existing setups
+
+#### 2. Motor ID Indexing Fix
+**File:** `operating_platform/robot/components/arm_normal_so101_v1/main.py`
+
+**Change:**
+```python
+# Before: 1-based indexing (motor.id - 1)
+goal_pos = {key: position[motor.id - 1] for key, motor in arm_bus.motors.items()}
+
+# After: 0-based indexing (motor.id)
+goal_pos = {key: position[motor.id] for key, motor in arm_bus.motors.items()}
+```
+
+**Impact:**
+- Fixes motor ID mapping inconsistencies
+- Aligns with standard 0-based array indexing
+- Prevents off-by-one errors in motor control
+
+#### 3. Joint Naming Standardization
+**Files:**
+- `operating_platform/robot/robots/configs.py`
+- `operating_platform/robot/components/arm_normal_so101_v1/main.py`
+
+**Change:**
+```python
+# Before: Descriptive names
+"joint_shoulder_pan", "joint_shoulder_lift", "joint_elbow_flex",
+"joint_wrist_flex", "joint_wrist_roll", "joint_gripper"
+
+# After: Numbered joints
+"joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "gripper"
+```
+
+**Benefits:**
+- Consistent naming across leader and follower arms
+- Simplifies joint mapping and calibration
+- Matches Piper arm naming convention
+
+#### 4. RADIANS Normalization Mode Support
+**File:** `operating_platform/robot/components/arm_normal_so101_v1/motors/motors_bus.py`
+
+**New Feature:**
+- Added RADIANS normalization mode for motor position conversion
+- Enables direct radian output for compatibility with Piper follower arm
+
+**Implementation:**
+```python
+elif self.motors[motor].norm_mode is MotorNormMode.RADIANS:
+    mid = (min_ + max_) / 2
+    max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
+    import math
+    normalized_values[id_] = (val - mid) * 2 * math.pi / max_res
+```
+
+**Use Case:**
+- Leader arm outputs radians for direct compatibility with Piper follower arm
+- Eliminates need for unit conversion in teleoperation pipeline
+
+#### 5. SO101 Robot Configuration Updates
+**File:** `operating_platform/robot/robots/configs.py`
+
+**Changes:**
+- **Leader Arm**: Updated to use 0-based motor IDs and numbered joint names
+- **Follower Arm**: Changed from FeetechMotorsBusConfig to PiperMotorsBusConfig
+  - Port: `/dev/ttyACM1` → `can_left`
+  - Motors: Feetech STS3215 → Piper motors (joint_1 through joint_6 + gripper)
+
+#### 6. Calibration Updates
+**Files:**
+- `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json`
+- `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-follower.json`
+
+**Changes:**
+- Updated calibration parameters for new motor configurations
+- Adjusted joint limits and offsets for Feetech leader arm
+
+#### 7. Documentation & Scripts
+**New Files:**
+- `README-sun.md`: Added calibration instructions for Feetech leader arm
+- `scripts/calib_feetech_leader.py`: New calibration script for Feetech leader arm
+
+**Removed Files:**
+- `scripts/find_can_pot.sh`: Removed obsolete CAN port detection script
+
+**Updated Files:**
+- `scripts/run_so101.sh`: Updated for new configuration
+- `operating_platform/robot/robots/so101_v1/dora_teleoperate_dataflow.yml`: Updated dataflow configuration
+
+### Migration Guide
+
+**For Existing Zhonglin Leader Arm Users:**
+- No changes required - system defaults to `MOTOR_PROTOCOL=auto` which maintains original behavior
+
+**For New Feetech Leader Arm Users:**
+1. Run calibration: `scripts/calib_feetech_leader.py`
+2. Set environment variable: `export MOTOR_PROTOCOL=feetech` (or use `auto` with `ARM_ROLE=leader`)
+3. Update calibration files in `.calibration/` directory
+
+**For Mixed Configurations:**
+- Use explicit `MOTOR_PROTOCOL` environment variable to override auto-detection
+- Ensure motor IDs match physical servo IDs (0-based indexing)
+
+### Technical Details
+
+**Motor Protocol Comparison:**
+
+| Feature | Zhonglin (ZP10D) | Feetech (STS3215) |
+|---------|------------------|-------------------|
+| Protocol | ASCII | Binary |
+| Baudrate | 115200 | Default (1000000) |
+| Use Case | Original SO101 leader | New leader/follower |
+| Output Mode | Radians | Configurable |
+
+**Joint ID Mapping:**
+
+| Joint Name | Motor ID | Physical Joint |
+|------------|----------|----------------|
+| joint_0 | 0 | Base rotation |
+| joint_1 | 1 | Shoulder pan |
+| joint_2 | 2 | Shoulder lift |
+| joint_3 | 3 | Elbow flex |
+| joint_4 | 4 | Wrist flex |
+| joint_5 | 5 | Wrist roll |
+| gripper | 6 | Gripper |
+
+### Testing
+- Verified Feetech leader arm teleoperation with Piper follower arm
+- Confirmed backward compatibility with Zhonglin leader arm
+- Validated motor ID indexing with physical hardware
+- Tested calibration workflow with new scripts
+
+---
+
 ## v0.2.141 (2026-01-08) - Follower Arm Jitter Elimination
 
 ### Summary

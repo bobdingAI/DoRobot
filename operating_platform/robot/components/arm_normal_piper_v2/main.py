@@ -105,9 +105,12 @@ def main():
 
                 position = event["value"].to_numpy().copy()
 
-                # Invert joint_4 and joint_5 (index 3, 4) from leader arm - direction compensation
-                position[3] = -position[3]
-                position[4] = -position[4]
+                # Invert joints for direction compensation
+                position[0] = -position[0]  # joint_0
+                position[1] = -position[1]  # joint_1
+                position[2] = -position[2]  # joint_2
+                position[3] = -position[3]  # joint_3
+                position[5] = -position[5]  # joint_5
 
                 # Get current follower arm position
                 current_joint = piper.GetArmJointMsgs()

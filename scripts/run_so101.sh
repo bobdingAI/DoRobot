@@ -243,6 +243,9 @@ export_device_ports() {
     export ARM_LEADER2_PORT
     export ARM_FOLLOWER2_PORT
 
+    # Export motor protocol (use feetech for leader arm)
+    export MOTOR_PROTOCOL="${MOTOR_PROTOCOL:-feetech}"
+
     # Log configuration
     log_info "Camera configuration:"
     log_info "  camera_top:   $CAMERA_TOP_PATH"
