@@ -84,7 +84,8 @@ nodes:
     outputs:
       - joint
     env:
-      CAN_BUS: can_left
+      # Use environment variable for CAN bus selection (same as inference mode)
+      CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
 
   # - id: arm_so101_leader2
   #   path: ../../components/arm_normal_so101_v1/main.py

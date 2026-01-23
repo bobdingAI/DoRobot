@@ -4,6 +4,324 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.144 (2026-01-23) - Configuration Unification and Documentation
+
+### Summary
+Unified CAN bus configuration between data collection and inference modes by introducing environment variable support. Documented complete camera reading logic and configuration priority system to ensure consistency across all operational modes.
+
+### Key Changes
+
+#### 1. CAN Bus Configuration Unification
+**File:** `operating_platform/robot/robots/so101_v1/dora_teleoperate_dataflow.yml:87`
+
+**Problem:**
+- Data collection mode had hardcoded `CAN_BUS: can_left`
+- Inference mode used environment variable `${ARM_FOLLOWER_PORT:-can_left}`
+- Configuration inconsistency between modes
+
+**Solution:**
+```yaml
+# Before
+CAN_BUS: can_left
+
+# After
+CAN_BUS: ${ARM_FOLLOWER_PORT:-can_left}
+```
+
+**Impact:**
+- Data collection and inference now use identical configuration logic
+- Both modes controlled through `ARM_FOLLOWER_PORT` environment variable
+- Default value remains `can_left` for backward compatibility
+- Easier to switch between different CAN interfaces without code changes
+
+#### 2. Camera Configuration Documentation
+
+**Camera Configuration Consistency:**
+
+Both data collection and inference use identical camera configuration:
+
+| Configuration | Data Collection | Inference | Notes |
+|--------------|----------------|-----------|-------|
+| Component | camera_opencv/main.py | camera_opencv/main.py | Same |
+| Trigger Rate | dora/timer/millis/33 | dora/timer/millis/33 | 30 FPS |
+| Environment Variable | $CAMERA_TOP_PATH | $CAMERA_TOP_PATH | Same |
+| Resolution | 640x480 | 640x480 | Same |
+
+**Camera Path Configuration Priority:**
+
+1. **Environment Variables (Highest Priority):**
+   ```bash
+   export CAMERA_TOP_PATH="/dev/video12"
+   export CAMERA_WRIST_PATH="/dev/video4"
+   ```
+
+2. **Device Configuration File** (`~/.dorobot_device.conf`):
+   ```bash
+   CAMERA_TOP_PATH="/dev/video12"
+   CAMERA_WRIST_PATH="/dev/video4"
+   ```
+
+3. **Script Default Values:**
+   - Data Collection: `scripts/run_so101.sh:124-125`
+     ```bash
+     CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
+     CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
+     ```
+   - Inference: `scripts/run_so101_inference.sh:107-108`
+     ```bash
+     CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
+     CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
+     ```
+
+**Camera Reading Process:**
+
+Code Location: `operating_platform/robot/components/camera_opencv/main.py`
+
+Key Steps:
+1. **Read Configuration** (line 86):
+   ```python
+   video_capture_path = os.getenv("CAPTURE_PATH", args.path)
+   ```
+
+2. **Path Parsing** (lines 94-98):
+   - Supports three formats:
+     - Numeric index: 0, 1, 2
+     - Direct device: /dev/video0
+     - Persistent path: /dev/v4l/by-path/platform-xxx-video-index0
+   ```python
+   if video_capture_path.isnumeric():
+       video_capture_path = int(video_capture_path)
+   ```
+
+3. **Open Camera** (line 110):
+   ```python
+   video_capture = cv2.VideoCapture(video_capture_path)
+   ```
+
+4. **Set Resolution** (lines 118-129):
+   ```python
+   image_width = os.getenv("IMAGE_WIDTH", args.image_width)
+   image_height = os.getenv("IMAGE_HEIGHT", args.image_height)
+   video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, image_width)
+   video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, image_height)
+   ```
+
+5. **Read Frame** (line 147):
+   ```python
+   ret, frame = video_capture.read()
+   ```
+
+6. **Image Processing** (lines 162-177):
+   - Flip (if FLIP environment variable is set)
+   - Resize (if actual size doesn't match settings)
+
+**Current System Configuration:**
+
+Based on `~/.dorobot_device.conf`:
+```bash
+CAMERA_TOP_PATH="/dev/video12"    # Orbbec Gemini 335
+CAMERA_WRIST_PATH="/dev/video4"   # Intel RealSense Depth Camera 405
+```
+
+**Key Features:**
+1. Persistent path support: Uses `/dev/v4l/by-path/` to avoid device number changes
+2. Automatic retry: Waits 0.5 seconds and retries once if opening fails
+3. Error handling: Shows black screen with error message on read failure
+4. Flexible configuration: Supports numeric index, device path, and persistent path
+
+#### 3. Complete Configuration Summary
+
+| Configuration | Data Collection | Inference | Source |
+|--------------|----------------|-----------|--------|
+| CAN Bus | ${ARM_FOLLOWER_PORT:-can_left} | ${ARM_FOLLOWER_PORT:-can_left} | Environment/Config File |
+| Top Camera | $CAMERA_TOP_PATH (default: 0) | $CAMERA_TOP_PATH (default: 0) | Environment/Config File |
+| Wrist Camera | $CAMERA_WRIST_PATH (default: 2) | $CAMERA_WRIST_PATH (default: 2) | Environment/Config File |
+| Resolution | 640x480 | 640x480 | DORA dataflow |
+| Frame Rate | 30 FPS | 30 FPS | DORA dataflow |
+
+### Benefits
+
+1. **Configuration Consistency**: Data collection and inference now use identical configuration mechanisms
+2. **Flexibility**: Easy to switch hardware configurations through environment variables
+3. **Documentation**: Complete understanding of camera and CAN bus configuration flow
+4. **Maintainability**: Centralized configuration reduces potential for mismatches
+5. **Debugging**: Clear priority order makes troubleshooting easier
+
+### Testing Recommendations
+
+1. Verify CAN bus configuration:
+   ```bash
+   # Test with default
+   ./scripts/run_so101.sh
+
+   # Test with custom CAN interface
+   export ARM_FOLLOWER_PORT="can_right"
+   ./scripts/run_so101.sh
+   ```
+
+2. Verify camera configuration:
+   ```bash
+   # Test with default numeric indices
+   ./scripts/run_so101.sh
+
+   # Test with persistent paths
+   export CAMERA_TOP_PATH="/dev/video12"
+   export CAMERA_WRIST_PATH="/dev/video4"
+   ./scripts/run_so101.sh
+   ```
+
+3. Verify inference mode uses same configuration:
+   ```bash
+   export ARM_FOLLOWER_PORT="can_left"
+   export CAMERA_TOP_PATH="/dev/video12"
+   ./scripts/run_so101_inference.sh
+   ```
+
+---
+
+## v0.2.143 (2026-01-23) - Inference Mode CAN Bus Configuration Fix
+
+### Summary
+Fixed critical inference mode bug where the wrong CAN bus interface was being used, causing the model to control a different robotic arm than the one used during data collection. This ensures consistency between training and inference by properly configuring CAN bus selection.
+
+### Key Changes
+
+#### 1. Fixed send_action Method in Manipulator
+**File:** `operating_platform/robot/robots/so101_v1/manipulator.py:728-757`
+
+**Problem:**
+- The `send_action` method was incorrectly iterating over `self.leader_arms` instead of `self.follower_arms`
+- This caused inference to send actions to the wrong arm
+- Action keys from the model (e.g., `main_leader_joint_0`) didn't match the follower arm names (e.g., `main_follower`)
+
+**Solution:**
+```python
+# Added mapping from follower to leader names for action key matching
+follower_to_leader_map = {
+    'main_follower': 'main_leader',
+    'second_follower': 'second_leader',
+}
+
+for follower_name in self.follower_arms:
+    # Get the corresponding leader name for action key matching
+    leader_name = follower_to_leader_map.get(follower_name, follower_name)
+
+    # Extract joint values from action dict using leader naming
+    goal_joint = [val for key, val in action.items() if leader_name in key and "joint" in key]
+
+    # Send to follower arm using correct event ID
+    so101_zmq_send(f"action_joint", goal_joint_numpy, wait_time_s=0.01)
+```
+
+**Impact:**
+- Inference now correctly sends actions to the follower arm
+- Proper mapping between model output (leader format) and follower arm control
+- Uses correct DORA event ID (`action_joint`) for inference mode
+
+#### 2. Fixed Device Configuration File
+**File:** `~/.dorobot_device.conf:23`
+
+**Problem:**
+- Device configuration file had `ARM_FOLLOWER_PORT="can_right"`
+- Data collection uses `can_left` (hardcoded in `dora_teleoperate_dataflow.yml:87`)
+- This mismatch caused inference to control a different physical arm
+
+**Solution:**
+```bash
+# Before
+ARM_FOLLOWER_PORT="can_right"
+
+# After
+ARM_FOLLOWER_PORT="can_left"
+```
+
+**Impact:**
+- Inference now uses the same CAN bus as data collection
+- Model controls the correct physical arm
+
+#### 3. Fixed Inference Script Default Value
+**File:** `scripts/run_so101_inference.sh:109`
+
+**Problem:**
+- Default value was set to `/dev/ttyACM0` (serial port device)
+- Piper follower arm uses CAN bus interface, not serial port
+- This caused incorrect device type to be used
+
+**Solution:**
+```bash
+# Before
+ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-/dev/ttyACM0}"
+
+# After
+# For inference with Piper follower arm, use CAN interface (not serial port)
+ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-can_left}"
+```
+
+**Impact:**
+- Script now defaults to correct CAN interface
+- Matches data collection configuration
+- Prevents serial port vs CAN bus confusion
+
+#### 4. Configuration Priority Documentation
+
+**CAN Bus Configuration Sources (in priority order):**
+
+**Data Collection Mode** (`dora_teleoperate_dataflow.yml`):
+- **Hardcoded**: `CAN_BUS: can_left` (line 87)
+- No environment variable override
+- Always uses `can_left`
+
+**Inference Mode** (`dora_control_dataflow.yml`):
+1. Environment variable `ARM_FOLLOWER_PORT` (if set)
+2. Device config file `~/.dorobot_device.conf` (loaded by script)
+3. Script default `scripts/run_so101_inference.sh:109`
+4. DORA dataflow default `${ARM_FOLLOWER_PORT:-can_left}`
+
+### Root Cause Analysis
+
+The issue occurred because:
+1. Data collection hardcoded `can_left` in the DORA dataflow
+2. Inference used environment variable `ARM_FOLLOWER_PORT` which was set to `can_right` in the device config
+3. The `send_action` method had a bug iterating over the wrong arm collection
+4. No validation ensured training and inference used the same CAN bus
+
+### Testing Verification
+
+**CAN Traffic Monitoring:**
+```bash
+# Before fix (inference using can_right):
+can_left TX:  129,795 packets (no change)
+can_right TX: 7,708 packets (increasing)
+
+# After fix (inference using can_left):
+can_left TX:  increasing
+can_right TX: no change
+```
+
+### Migration Notes
+
+**For Existing Installations:**
+1. Check your device config file: `cat ~/.dorobot_device.conf`
+2. Verify `ARM_FOLLOWER_PORT` matches your data collection CAN bus
+3. If you collected data with `can_left`, ensure config has `ARM_FOLLOWER_PORT="can_left"`
+4. If you collected data with `can_right`, ensure config has `ARM_FOLLOWER_PORT="can_right"`
+
+**To Verify Configuration:**
+```bash
+# Check which CAN bus is being used during inference
+ip -s link show can_left | grep "TX:" -A1
+ip -s link show can_right | grep "TX:" -A1
+# The one with increasing TX packets is being controlled
+```
+
+### Related Files Modified
+- `operating_platform/robot/robots/so101_v1/manipulator.py`
+- `~/.dorobot_device.conf`
+- `scripts/run_so101_inference.sh`
+- `operating_platform/robot/robots/so101_v1/dora_control_dataflow.yml` (verified, no change needed)
+
+---
+
 ## v0.2.142 (2026-01-22) - Feetech Leader Arm Support & Motor Protocol Refactoring
 
 ### Summary

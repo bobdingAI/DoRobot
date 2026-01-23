@@ -732,18 +732,29 @@ class SO101Manipulator:
                 "KochRobot is not connected. You need to run `robot.connect()`."
             )
 
-        for name in self.leader_arms:
-            goal_joint = [ val for key, val in action.items() if name in key and "joint" in key]
-            # goal_gripper = [ val for key, val in action.items() if name in key and "gripper" in key]
+        # Map follower arm names to corresponding leader arm names in action dict
+        # During inference, actions are in leader format but need to be sent to follower
+        follower_to_leader_map = {
+            'main_follower': 'main_leader',
+            'second_follower': 'second_leader',
+        }
 
-            # goal_joint = action[(arm_index*arm_action_dim+from_idx):(arm_index*arm_action_dim+to_idx)]
-            # goal_gripper = action[arm_index*arm_action_dim + 12]
-            # arm_index += 1
+        for follower_name in self.follower_arms:
+            # Get the corresponding leader name for action key matching
+            leader_name = follower_to_leader_map.get(follower_name, follower_name)
+
+            # Extract joint values from action dict using leader naming
+            goal_joint = [val for key, val in action.items() if leader_name in key and "joint" in key]
+
+            if not goal_joint:
+                # If no leader-named actions found, try follower-named (for compatibility)
+                goal_joint = [val for key, val in action.items() if follower_name in key and "joint" in key]
+
             goal_joint_numpy = np.array([t for t in goal_joint], dtype=np.float32)
-            # goal_gripper_numpy = np.array([t.item() for t in goal_gripper], dtype=np.float32)
-            # position = np.concatenate([goal_joint_numpy, goal_gripper_numpy], axis=0)
 
-            so101_zmq_send(f"action_joint_{name}", goal_joint_numpy, wait_time_s=0.01)
+            # In inference mode, send to "action_joint" (DORA control dataflow expects this)
+            # In teleoperate mode, this would be "action_joint_ctrl" but we use the simpler name
+            so101_zmq_send(f"action_joint", goal_joint_numpy, wait_time_s=0.01)
 
 
 

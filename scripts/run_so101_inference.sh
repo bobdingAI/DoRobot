@@ -106,7 +106,8 @@ done
 # =============================================================================
 CAMERA_TOP_PATH="${CAMERA_TOP_PATH:-0}"
 CAMERA_WRIST_PATH="${CAMERA_WRIST_PATH:-2}"
-ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-/dev/ttyACM0}"
+# For inference with Piper follower arm, use CAN interface (not serial port)
+ARM_FOLLOWER_PORT="${ARM_FOLLOWER_PORT:-can_left}"
 
 # Export for DORA dataflow
 export CAMERA_TOP_PATH
