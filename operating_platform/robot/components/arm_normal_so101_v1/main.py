@@ -180,6 +180,9 @@ def main():
     filtered_positions = None
     filter_alpha = 0.2  # Stronger filtering (was 0.3)
 
+    # Flag to print joint data only once
+    joint_data_printed = False
+
     for event in node:
         if event["type"] == "INPUT":
             if "action" in event["id"]:
@@ -216,9 +219,10 @@ def main():
                         filtered_positions = filter_alpha * joint_array + (1 - filter_alpha) * filtered_positions
                     joint_value = filtered_positions.tolist()
 
-                # Debug: print what we're sending (only print occasionally)
-                if ctrl_frame % 100 == 0:
+                # Debug: print what we're sending (only once)
+                if not joint_data_printed:
                     print(f"[{ARM_NAME}] 发送关节数据: 长度={len(joint_value)}, 值={[f'{v:.3f}' for v in joint_value]}")
+                    joint_data_printed = True
 
                 node.send_output("joint", pa.array(joint_value, type=pa.float32()))
 

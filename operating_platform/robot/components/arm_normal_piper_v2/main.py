@@ -167,7 +167,9 @@ def main():
                     round(target_positions[5])
                 )
                 if len(position) > 6 and not np.isnan(position[6]):
-                    piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
+                    # Clamp gripper value to 0-1 range
+                    gripper_value = max(0.0, min(1.0, position[6]))
+                    piper.GripperCtrl(int(gripper_value * 1000 * 1000), 1000, 0x01, 0)
 
             elif event["id"] == "action_joint_ctrl":
                 
@@ -184,7 +186,9 @@ def main():
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
                 piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                 if len(position) > 6 and not np.isnan(position[6]):
-                    piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
+                    # Clamp gripper value to 0-1 range
+                    gripper_value = max(0.0, min(1.0, position[6]))
+                    piper.GripperCtrl(int(gripper_value * 1000 * 1000), 1000, 0x01, 0)
 
             elif event["id"] == "action_endpose":
                 
@@ -212,7 +216,9 @@ def main():
                     continue
 
                 position = event["value"].to_numpy()
-                piper.GripperCtrl(int(abs(position[0] * 1000 * 1000)), 1000, 0x01, 0)
+                # Clamp gripper value to 0-1 range
+                gripper_value = max(0.0, min(1.0, position[0]))
+                piper.GripperCtrl(int(gripper_value * 1000 * 1000), 1000, 0x01, 0)
 
             elif event["id"] == "tick":
                 # Slave Arm

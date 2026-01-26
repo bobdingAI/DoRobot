@@ -472,8 +472,8 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
         current_episode = record.dataset.meta.total_episodes
 
         logging.info("Recording active. Press:")
-        logging.info("- 'n' to save current episode and start new one")
-        logging.info("- 'p' to proceed after environment reset")
+        logging.info("- 's' to save current episode and start new one")
+        logging.info("- 'n' to proceed after environment reset")
         if offload_mode == OFFLOAD_EDGE:
             logging.info("- 'e' to stop and upload to edge server for encoding/training")
         elif offload_mode == OFFLOAD_CLOUD_RAW:
@@ -517,7 +517,7 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     key = ord('e')
 
             # 处理用户输入
-            if key in [ord('n'), ord('N')]:
+            if key in [ord('s'), ord('S')]:
                 logging.info("Saving current episode and starting new one...")
 
                 # Save current episode (non-blocking)
@@ -535,13 +535,13 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                                        f"{status['failed_episodes']}")
 
                 logging.info("*"*30)
-                logging.info("Reset Environment - Press 'p' to proceed to next episode")
+                logging.info("Reset Environment - Press 'n' to proceed to next episode")
                 logging.info("*"*30)
 
                 # Voice prompt: reset environment
-                log_say("请重置环境。按P键继续。", play_sounds=True)
+                log_say("请重置环境。按N键继续。", play_sounds=True)
 
-                # Wait for 'p' to proceed (with timeout)
+                # Wait for 'n' to proceed (with timeout)
                 reset_start = time.time()
                 reset_timeout = 60  # 60 seconds timeout
 
@@ -553,11 +553,11 @@ def record_loop(cfg: ControlPipelineConfig, daemon: Daemon):
                     # Get next episode index from the new buffer (allocated after save)
                     if observation and not is_headless():
                         next_episode = record.dataset.episode_buffer.get("episode_index", 0)
-                        key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press P")
+                        key = camera_display.show(observation, episode_index=next_episode, status="Reset - Press N")
                     else:
                         key = cv2.waitKey(10)
 
-                    if key in [ord('p'), ord('P')]:
+                    if key in [ord('n'), ord('N')]:
                         logging.info("Reset confirmed. Proceeding to next episode...")
                         break
                     elif key in [ord('e'), ord('E')]:

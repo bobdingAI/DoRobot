@@ -4,6 +4,244 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.145 (2026-01-26) - Gripper Control Fix and UI Improvements
+
+### Summary
+Fixed critical gripper teleoperation issues caused by incorrect calibration parameters and abs() function misuse. Updated keyboard shortcuts for better UX. Added comprehensive gripper monitoring and diagnostic tools.
+
+### Key Changes
+
+#### 1. Gripper Calibration Fix
+**Files:**
+- `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json`
+
+**Problem:**
+- Incorrect `homing_offset = -192` caused negative normalized values
+- Calibration range (2125-2522) didn't match actual hardware range (1894-2491)
+- Negative values were incorrectly converted by `abs()` function, causing gripper to reverse behavior at mid-range
+
+**Root Cause Analysis:**
+```python
+# With homing_offset = -192 and range_min = 2125:
+normalized = ((2125 + (-192)) - 2125) / 397 * 100 = -48.36%  # Negative!
+
+# abs() converted negative to positive, reversing gripper behavior:
+piper.GripperCtrl(int(abs(-0.48 * 1000000)))  # Wrong direction!
+```
+
+**Solution:**
+```json
+// Before
+"gripper": {
+    "homing_offset": -192,
+    "range_min": 2125,
+    "range_max": 2522
+}
+
+// After
+"gripper": {
+    "homing_offset": 0,
+    "range_min": 1894,
+    "range_max": 2491
+}
+```
+
+**Impact:**
+- Eliminated negative normalized values
+- Matched actual hardware motion range (597 steps vs 397 steps)
+- Gripper now operates smoothly across full range without sudden reversals
+
+#### 2. Piper Gripper Control Logic Fix
+**File:** `operating_platform/robot/components/arm_normal_piper_v2/main.py`
+
+**Problem:**
+- Used `abs()` function on gripper values, causing incorrect behavior with negative values
+- Inconsistent with joint control logic (joints don't use abs())
+
+**Solution:**
+```python
+# Before (3 locations - lines 170, 187, 219)
+piper.GripperCtrl(int(abs(position[6] * 1000 * 1000)), 1000, 0x01, 0)
+
+# After
+gripper_value = max(0.0, min(1.0, position[6]))  # Clamp to 0-1 range
+piper.GripperCtrl(int(gripper_value * 1000 * 1000), 1000, 0x01, 0)
+```
+
+**Why This Fix Works:**
+- **Joints use pose mapping**: Allow negative values for relative motion
+- **Gripper uses direct mapping**: Should be 0-1 range, negative values clamped to 0
+- **Removed abs()**: Prevents incorrect conversion of negative values to positive
+- **Added clamping**: Ensures values stay within valid 0-1 range
+
+**Technical Details:**
+- Piper `GripperCtrl(gripper_angle, ...)` parameter is in 0.001mm units
+- 0 = fully closed, 1000000 = 1000mm open (fully open)
+- Direct mapping: leader 0.0 → Piper 0, leader 1.0 → Piper 1000000
+
+#### 3. Keyboard Shortcuts Update
+**Files:**
+- `operating_platform/core/main.py` (lines 475-476, 520, 538, 542, 544, 556, 560)
+- `scripts/run_so101.sh` (lines 773-774)
+
+**Changes:**
+```
+Before:
+- 'n' key: Save episode and start new one
+- 'p' key: Proceed after environment reset
+
+After:
+- 's' key: Save episode and start new one
+- 'n' key: Proceed after environment reset
+- 'e' key: Stop recording and exit (unchanged)
+```
+
+**Rationale:**
+- More intuitive: S = Save, N = Next
+- Consistent with common software conventions
+- Reduces user confusion during data collection
+
+#### 4. SO101 Leader Arm Print Reduction
+**File:** `operating_platform/robot/components/arm_normal_so101_v1/main.py`
+
+**Change:**
+```python
+# Before: Print every 100 frames
+if ctrl_frame % 100 == 0:
+    print(f"[SO101-leader] 发送关节数据: ...")
+
+# After: Print only once
+joint_data_printed = False
+if not joint_data_printed:
+    print(f"[SO101-leader] 发送关节数据: ...")
+    joint_data_printed = True
+```
+
+**Impact:**
+- Reduced console spam during teleoperation
+- Cleaner log output for debugging
+- Still provides initial confirmation that data is being sent
+
+### New Tools Added
+
+#### 1. Gripper Monitoring Script
+**File:** `scripts/monitor_so101_piper_gripper.py`
+
+**Features:**
+- Real-time monitoring of leader (SO101) and follower (Piper) gripper states
+- Displays PWM values, normalized values, and range percentages
+- Detects anomalies: sudden releases, large deviations, overflow risks
+- Logs data to CSV for post-analysis
+- 20Hz sampling rate
+
+**Usage:**
+```bash
+python scripts/monitor_so101_piper_gripper.py \
+    --leader-port /dev/ttyACM0 \
+    --can-bus can_left
+```
+
+#### 2. Gripper Normalization Diagnostic
+**File:** `scripts/diagnose_gripper_normalization.py`
+
+**Features:**
+- Validates calibration parameters
+- Tests normalization across PWM range
+- Detects negative value issues
+- Provides recommendations for fixes
+
+**Usage:**
+```bash
+python scripts/diagnose_gripper_normalization.py
+```
+
+#### 3. Gripper Conversion Test
+**File:** `scripts/test_gripper_conversion.py`
+
+**Features:**
+- Compares old (abs) vs new (clamp) conversion logic
+- Tests edge cases (negative values, overflow)
+- Validates mapping correctness
+
+### Technical Documentation
+
+#### Gripper Control Methods Comparison
+
+**Joint Control (Pose Mapping):**
+```python
+# Relative offset mapping
+target = follower_baseline + (leader_current - leader_baseline)
+
+# Allows negative values for bidirectional motion
+# Safe startup from any position
+# Handles calibration differences between leader/follower
+```
+
+**Gripper Control (Direct Mapping):**
+```python
+# Absolute value mapping
+piper_value = leader_normalized * 1000000
+
+# 0-1 range only (clamped)
+# Simple one-to-one correspondence
+# No baseline position needed
+```
+
+**Why Different Methods:**
+- Joints: 6 DOF, complex kinematics, need relative motion safety
+- Gripper: 1 DOF, simple open/close, direct mapping sufficient
+
+### Files Modified
+
+**Core System:**
+- `operating_platform/core/main.py` - Keyboard shortcuts update
+- `operating_platform/robot/components/arm_normal_piper_v2/main.py` - Gripper control fix
+- `operating_platform/robot/components/arm_normal_so101_v1/main.py` - Print reduction
+- `operating_platform/robot/components/arm_normal_so101_v1/.calibration/SO101-leader.json` - Calibration fix
+- `scripts/run_so101.sh` - UI text update
+
+**New Tools:**
+- `scripts/monitor_so101_piper_gripper.py` - Real-time gripper monitoring
+- `scripts/diagnose_gripper_normalization.py` - Calibration diagnostic
+- `scripts/test_gripper_conversion.py` - Conversion logic test
+- `scripts/GRIPPER_MONITOR_README.md` - Tool documentation
+
+### Testing & Validation
+
+**Validation Steps:**
+1. Run diagnostic script to verify calibration
+2. Monitor gripper values during teleoperation
+3. Confirm smooth motion across full range
+4. Verify no sudden reversals at mid-range
+
+**Expected Behavior:**
+- Leader gripper open (PWM 1894) → Follower gripper responds
+- Leader gripper close (PWM 2491) → Follower gripper responds
+- Smooth motion throughout range
+- No sudden direction changes
+
+### Known Issues
+
+**Gripper Direction:**
+- Current mapping: Leader open → Follower close, Leader close → Follower open
+- Direction is inverted but consistent
+- Can be corrected by swapping range_min/range_max if needed
+- Functionality is correct, only direction is reversed
+
+### Migration Notes
+
+**For Existing Installations:**
+1. Update calibration file: `SO101-leader.json`
+2. Restart data collection system to load new code
+3. Test gripper operation across full range
+4. Use monitoring tools if issues persist
+
+**Breaking Changes:**
+- Keyboard shortcuts changed ('n' → 's' for save, 'p' → 'n' for next)
+- Users need to learn new key mappings
+
+---
+
 ## v0.2.144 (2026-01-23) - Configuration Unification and Documentation
 
 ### Summary

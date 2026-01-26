@@ -770,8 +770,8 @@ main() {
     echo ""
     echo "=========================================="
     echo "  Controls:"
-    echo "    'n'     - Save episode and start new one"
-    echo "    'p'     - Proceed after robot reset"
+    echo "    's'     - Save episode and start new one"
+    echo "    'n'     - Proceed after robot reset"
     if [ "$CLOUD" == "4" ]; then
         echo "    'e'     - Stop, save raw images locally (use edge_encode.py later)"
     elif [ "$CLOUD" == "3" ]; then
