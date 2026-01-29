@@ -1,5 +1,6 @@
 import pickle
 import time
+import struct
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import os
@@ -10,7 +11,7 @@ import json
 import numpy as np
 import torch
 
-from typing import Any
+from typing import Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 from functools import cache
@@ -27,6 +28,137 @@ from operating_platform.config.cameras import CameraConfig, OpenCVCameraConfig
 
 from operating_platform.robot.robots.camera import Camera
 
+
+# =============================================================================
+# Zenoh Distributed Mode Support
+# =============================================================================
+
+# Check if Zenoh distributed mode is enabled
+ZENOH_LEADER_ENDPOINT = os.getenv("ZENOH_LEADER_ENDPOINT")
+ZENOH_SYSTEM_ID = os.getenv("DOROBOT_SYSTEM_ID", "so101")
+
+# Zenoh message format constants
+JOINT_MSG_FORMAT = '<QI6fB'  # timestamp(u64) + sequence(u32) + positions(6xf32) + flags(u8)
+JOINT_MSG_SIZE = struct.calcsize(JOINT_MSG_FORMAT)
+
+
+class ZenohLeaderSubscriber:
+    """
+    Zenoh subscriber for receiving leader joint positions in distributed mode.
+
+    When ZENOH_LEADER_ENDPOINT is set, the follower receives leader arm
+    positions over the network instead of from local DORA/ZeroMQ.
+    """
+
+    def __init__(self, endpoint: str, system_id: str = "so101"):
+        self.endpoint = endpoint
+        self.system_id = system_id
+        self._session = None
+        self._subscriber = None
+
+        # Latest received data (thread-safe via GIL for simple assignments)
+        self._last_positions: Optional[np.ndarray] = None
+        self._last_timestamp: int = 0
+        self._last_sequence: int = 0
+        self._connected = False
+
+        # Connection monitoring
+        self._heartbeat_timeout_s = 3.0
+        self._last_heartbeat_time = 0
+
+    def connect(self) -> bool:
+        """Initialize Zenoh and subscribe to leader joint topic."""
+        try:
+            import zenoh
+        except ImportError:
+            print("[Zenoh] ERROR: zenoh not installed. Install with: pip install eclipse-zenoh")
+            return False
+
+        try:
+            # Configure Zenoh
+            zenoh_config = zenoh.Config()
+            zenoh_config.insert_json5(
+                "connect/endpoints",
+                json.dumps([self.endpoint])
+            )
+            # Enable multicast scouting for peer discovery
+            zenoh_config.insert_json5("scouting/multicast/enabled", "true")
+
+            # Open session
+            print(f"[Zenoh] Connecting to leader at {self.endpoint}...")
+            self._session = zenoh.open(zenoh_config)
+
+            # Subscribe to leader joint state
+            topic = f"dorobot/{self.system_id}/leader/joint"
+            self._subscriber = self._session.declare_subscriber(
+                topic,
+                self._on_leader_joint
+            )
+
+            print(f"[Zenoh] Subscribed to: {topic}")
+            self._connected = True
+            return True
+
+        except Exception as e:
+            print(f"[Zenoh] Failed to connect: {e}")
+            return False
+
+    def _on_leader_joint(self, sample):
+        """Callback when leader joint data is received."""
+        try:
+            data = sample.payload.to_bytes()
+            if len(data) != JOINT_MSG_SIZE:
+                print(f"[Zenoh] Invalid message size: {len(data)} (expected {JOINT_MSG_SIZE})")
+                return
+
+            unpacked = struct.unpack(JOINT_MSG_FORMAT, data)
+            timestamp_ns = unpacked[0]
+            sequence = unpacked[1]
+            positions = list(unpacked[2:8])
+            flags = unpacked[8]
+
+            # Update latest data
+            self._last_positions = np.array(positions, dtype=np.float32)
+            self._last_timestamp = timestamp_ns
+            self._last_sequence = sequence
+            self._last_heartbeat_time = time.time()
+
+            # Calculate and log latency periodically
+            if sequence % 300 == 0:  # Every 10 seconds at 30Hz
+                latency_ms = (time.time_ns() - timestamp_ns) / 1_000_000
+                print(f"[Zenoh] seq={sequence}, latency={latency_ms:.1f}ms, pos={self._last_positions}")
+
+        except Exception as e:
+            print(f"[Zenoh] Error parsing message: {e}")
+
+    def get_leader_positions(self) -> Optional[np.ndarray]:
+        """Get latest leader positions (or None if no data received yet)."""
+        return self._last_positions
+
+    def is_leader_connected(self) -> bool:
+        """Check if we're receiving data from the leader."""
+        if not self._connected:
+            return False
+        return (time.time() - self._last_heartbeat_time) < self._heartbeat_timeout_s
+
+    def disconnect(self) -> None:
+        """Disconnect from Zenoh."""
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception as e:
+                print(f"[Zenoh] Error during disconnect: {e}")
+            self._session = None
+        self._connected = False
+
+
+# Global Zenoh subscriber instance (only initialized if ZENOH_LEADER_ENDPOINT is set)
+_zenoh_subscriber: Optional[ZenohLeaderSubscriber] = None
+
+
+# =============================================================================
+# ZeroMQ Local Mode (Original Implementation)
+# =============================================================================
 
 ipc_address_image = "ipc:///tmp/dora-zeromq-so101-image"
 ipc_address_joint = "ipc:///tmp/dora-zeromq-so101-joint"
@@ -251,6 +383,8 @@ def make_cameras_from_configs(camera_configs: dict[str, CameraConfig]) -> list[C
 
 class SO101Manipulator:
     def __init__(self, config: SO101RobotConfig):
+        global _zenoh_subscriber
+
         self.config = config
         self.robot_type = self.config.type
 
@@ -269,18 +403,35 @@ class SO101Manipulator:
         self.follower_arms = {}
         self.follower_arms['main_follower'] = self.config.follower_arms["main"]
         # self.follower_arms['second_follower'] = self.config.follower_arms["second"]
-        
+
         self.cameras = make_cameras_from_configs(self.config.cameras)
-        
+
         self.connect_excluded_cameras = ["image_pika_pose"]
+
+        # Check for distributed mode (leader on different PC via Zenoh)
+        self.use_zenoh_leader = ZENOH_LEADER_ENDPOINT is not None
+        if self.use_zenoh_leader:
+            print(f"[SO101] Distributed mode: Leader via Zenoh at {ZENOH_LEADER_ENDPOINT}")
+            _zenoh_subscriber = ZenohLeaderSubscriber(
+                endpoint=ZENOH_LEADER_ENDPOINT,
+                system_id=ZENOH_SYSTEM_ID
+            )
+        else:
+            print("[SO101] Local mode: Leader via ZeroMQ/DORA")
 
         self.recv_image_thread = threading.Thread(target=recv_image_server, daemon=True)
         self.recv_image_thread.start()
 
-        self.recv_joint_thread = threading.Thread(target=recv_joint_server, daemon=True)
-        self.recv_joint_thread.start()
+        # Only start ZeroMQ joint receiver if not using Zenoh for leader
+        if not self.use_zenoh_leader:
+            self.recv_joint_thread = threading.Thread(target=recv_joint_server, daemon=True)
+            self.recv_joint_thread.start()
+        else:
+            # Still need to receive follower joint data via ZeroMQ
+            self.recv_joint_thread = threading.Thread(target=recv_joint_server, daemon=True)
+            self.recv_joint_thread.start()
 
-        
+
         self.is_connected = False
         self.logs = {}
 
@@ -353,27 +504,51 @@ class SO101Manipulator:
         }
     
     def connect(self):
+        global _zenoh_subscriber
+
         # Initialize ZeroMQ sockets (lazy initialization)
         _init_zmq()
+
+        # Connect to Zenoh if in distributed mode
+        if self.use_zenoh_leader and _zenoh_subscriber is not None:
+            print("[SO101] Connecting to remote leader via Zenoh...")
+            if not _zenoh_subscriber.connect():
+                print("[SO101] WARNING: Failed to connect to Zenoh leader, falling back to local mode")
+                self.use_zenoh_leader = False
 
         timeout = 50  # 统一的超时时间（秒）
         start_time = time.perf_counter()
 
         # Detect mode by checking if leader arm DATA is being sent
+        # In distributed mode, leader data comes from Zenoh, not local ZeroMQ
         # In inference mode (dora_control_dataflow.yml), no leader arm is connected
         # In teleoperation mode (dora_teleoperate_dataflow.yml), leader arm sends data
         print("[SO101] Detecting available data streams...")
         leader_arm_timeout = 3.0
         leader_arm_start = time.perf_counter()
         has_leader_arm_data = False
-        while time.perf_counter() - leader_arm_start < leader_arm_timeout:
-            if any(any(name in key for key in recv_joint) for name in self.leader_arms):
-                has_leader_arm_data = True
-                break
-            time.sleep(0.1)
+
+        if self.use_zenoh_leader:
+            # In distributed mode, wait for Zenoh data
+            print("[SO101] Waiting for remote leader data via Zenoh...")
+            while time.perf_counter() - leader_arm_start < leader_arm_timeout:
+                if _zenoh_subscriber is not None and _zenoh_subscriber.get_leader_positions() is not None:
+                    has_leader_arm_data = True
+                    break
+                time.sleep(0.1)
+        else:
+            # Original local mode detection
+            while time.perf_counter() - leader_arm_start < leader_arm_timeout:
+                if any(any(name in key for key in recv_joint) for name in self.leader_arms):
+                    has_leader_arm_data = True
+                    break
+                time.sleep(0.1)
 
         if has_leader_arm_data:
-            print("[SO101] Leader arm data detected - teleoperation mode")
+            if self.use_zenoh_leader:
+                print("[SO101] Remote leader data detected via Zenoh - distributed teleoperation mode")
+            else:
+                print("[SO101] Leader arm data detected - teleoperation mode")
         else:
             print("[SO101] No leader arm data - inference mode (follower only)")
 
@@ -537,20 +712,31 @@ class SO101Manipulator:
                     self.logs[f"read_follower_{name}_joint_dt_s"] = time.perf_counter() - now
                     
         leader_joint = {}
-        for name in self.leader_arms:
-            for match_name in recv_joint:
-                if name in match_name:
-                    now = time.perf_counter()
-
-                    byte_array = np.zeros(6, dtype=np.float32)
-                    pose_read = recv_joint[match_name]
-
-                    byte_array[:6] = pose_read[:]
-                    byte_array = np.round(byte_array, 3)
-                    
-                    leader_joint[name] = byte_array
-
+        if self.use_zenoh_leader and _zenoh_subscriber is not None:
+            # Get leader positions from Zenoh (distributed mode)
+            zenoh_positions = _zenoh_subscriber.get_leader_positions()
+            if zenoh_positions is not None:
+                now = time.perf_counter()
+                for name in self.leader_arms:
+                    # Use the Zenoh positions directly (already normalized)
+                    leader_joint[name] = np.round(zenoh_positions.copy(), 3)
                     self.logs[f"read_leader_{name}_joint_dt_s"] = time.perf_counter() - now
+        else:
+            # Original local mode: read from ZeroMQ
+            for name in self.leader_arms:
+                for match_name in recv_joint:
+                    if name in match_name:
+                        now = time.perf_counter()
+
+                        byte_array = np.zeros(6, dtype=np.float32)
+                        pose_read = recv_joint[match_name]
+
+                        byte_array[:6] = pose_read[:]
+                        byte_array = np.round(byte_array, 3)
+
+                        leader_joint[name] = byte_array
+
+                        self.logs[f"read_leader_{name}_joint_dt_s"] = time.perf_counter() - now
 
         obs_dict, action_dict = {}, {}
 
@@ -776,6 +962,8 @@ class SO101Manipulator:
     #     return torch.cat(action_sent)
 
     def disconnect(self):
+        global _zenoh_subscriber
+
         if not self.is_connected:
             raise RobotDeviceNotConnectedError(
                 "Aloha is not connected. You need to run `robot.connect()` before disconnecting."
@@ -795,6 +983,11 @@ class SO101Manipulator:
             self.recv_image_thread.join(timeout=3.0)
         if self.recv_joint_thread.is_alive():
             self.recv_joint_thread.join(timeout=3.0)
+
+        # Clean up Zenoh subscriber if in distributed mode
+        if _zenoh_subscriber is not None:
+            _zenoh_subscriber.disconnect()
+            _zenoh_subscriber = None
 
         # Clean up ZeroMQ sockets
         _cleanup_zmq()
