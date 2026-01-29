@@ -4,6 +4,57 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.141 (2026-01-28) - Distributed Teleoperation via Zenoh
+
+### Summary
+Added support for distributed teleoperation where the leader arm runs on a
+separate PC from the follower arm, communicating via Zenoh over LAN.
+
+### New Features
+
+**Standalone Leader System (`remote_leader/`):**
+- Complete standalone package that can run independently without DoRobot
+- `leader_main.py`: Main entry point for leader arm
+- `zenoh_publisher.py`: Zenoh publishing for joint state, calibration, heartbeat
+- `arm_driver.py`: Feetech motor driver wrapper
+- `messages.py`: Binary/JSON message protocol definitions
+- Includes complete motor driver library
+
+**Zenoh Communication Protocol:**
+- Topic: `dorobot/so101/leader/joint` - 30Hz joint positions (37-byte binary)
+- Topic: `dorobot/so101/leader/calibration` - JSON calibration on startup
+- Topic: `dorobot/so101/leader/heartbeat` - 1Hz connection status
+
+**Follower Modifications:**
+- Added `ZenohLeaderSubscriber` class in `manipulator.py`
+- Auto-detect distributed mode via `ZENOH_LEADER_ENDPOINT` env var
+- Seamless fallback to local ZeroMQ/DORA mode when env var not set
+
+### Usage
+
+```bash
+# Leader PC
+cd remote_leader
+pip install -r requirements.txt
+python leader_main.py
+
+# Follower PC
+ZENOH_LEADER_ENDPOINT=tcp://192.168.1.100:7447 bash scripts/run_so101.sh
+```
+
+### Documentation
+- Added `docs/DISTRIBUTED_TELEOPERATION.md` with full architecture and API docs
+
+### Files Added
+- `remote_leader/` - Complete standalone leader system
+- `operating_platform/robot/robots/so101_v1/zenoh_messages.py`
+- `docs/DISTRIBUTED_TELEOPERATION.md`
+
+### Files Modified
+- `operating_platform/robot/robots/so101_v1/manipulator.py` - Zenoh subscriber
+
+---
+
 ## v0.2.140 (2025-12-22) - Fix Non-Consecutive Episode Indices Bug
 
 ### Summary

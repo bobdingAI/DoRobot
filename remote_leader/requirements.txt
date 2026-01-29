@@ -1,0 +1,23 @@
+# Remote Leader Dependencies
+# These are the minimal dependencies needed to run the leader system standalone
+
+# Zenoh for distributed communication
+eclipse-zenoh>=1.0.0
+
+# Numerical computing
+numpy>=1.24.0
+
+# Configuration file parsing
+draccus>=0.7.0
+
+# Feetech servo SDK
+scservo-sdk>=1.0.0
+
+# Serial communication
+pyserial>=3.5
+
+# For diff-based motor validation
+deepdiff>=6.0.0
+
+# Progress bars
+tqdm>=4.65.0
