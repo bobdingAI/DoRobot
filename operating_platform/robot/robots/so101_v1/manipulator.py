@@ -569,8 +569,9 @@ class SO101Manipulator:
             ),
         ]
 
-        # Only check for leader arm if leader arm data is being sent
-        if has_leader_arm_data:
+        # Only check for leader arm if leader arm data is being sent via local ZeroMQ
+        # In distributed mode (Zenoh), leader data comes from remote PC, not local ZeroMQ
+        if has_leader_arm_data and not self.use_zenoh_leader:
             conditions.insert(1, (
                 lambda: all(
                     any(name in key for key in recv_joint)
@@ -651,10 +652,14 @@ class SO101Manipulator:
 
         # 主臂数据状态 (only in teleoperation mode)
         if has_leader_arm_data:
-            arm_received = [name for name in self.leader_arms
-                        if any(name in key for key in recv_joint)]
-            if arm_received:
-                success_messages.append(f"主臂关节角度: {', '.join(arm_received)}")
+            if self.use_zenoh_leader:
+                # In distributed mode, leader data comes from Zenoh
+                success_messages.append(f"主臂关节角度: via Zenoh ({ZENOH_LEADER_ENDPOINT})")
+            else:
+                arm_received = [name for name in self.leader_arms
+                            if any(name in key for key in recv_joint)]
+                if arm_received:
+                    success_messages.append(f"主臂关节角度: {', '.join(arm_received)}")
 
         # 从臂数据状态
         arm_received = [name for name in self.follower_arms

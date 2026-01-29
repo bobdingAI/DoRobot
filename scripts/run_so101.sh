@@ -531,8 +531,19 @@ start_dora() {
         exit 1
     fi
 
+    # Select dataflow file based on mode
+    # ZENOH_LEADER_ENDPOINT set = distributed mode (no local leader arm)
+    local dataflow_name
+    if [ -n "$ZENOH_LEADER_ENDPOINT" ]; then
+        dataflow_name="dora_distributed_dataflow.yml"
+        log_info "Distributed mode: leader via Zenoh at $ZENOH_LEADER_ENDPOINT"
+    else
+        dataflow_name="dora_teleoperate_dataflow.yml"
+        log_info "Local mode: both arms on this machine"
+    fi
+
     # Check if dataflow file exists
-    local dataflow_file="$DORA_DIR/dora_teleoperate_dataflow.yml"
+    local dataflow_file="$DORA_DIR/$dataflow_name"
     if [ ! -f "$dataflow_file" ]; then
         log_error "Dataflow file not found: $dataflow_file"
         exit 1
@@ -541,8 +552,8 @@ start_dora() {
     # Start DORA in background
     cd "$DORA_DIR"
 
-    log_info "Running: dora run dora_teleoperate_dataflow.yml"
-    dora run dora_teleoperate_dataflow.yml &
+    log_info "Running: dora run $dataflow_name"
+    dora run "$dataflow_name" &
     DORA_PID=$!
 
     # Give DORA a moment to initialize
@@ -557,7 +568,8 @@ start_dora() {
     log_info "DORA started (PID: $DORA_PID)"
 
     # Try to get the graph name for cleaner shutdown
-    DORA_GRAPH_NAME=$(dora list 2>/dev/null | grep -oP 'dora_teleoperate_dataflow[^\s]*' | head -1) || true
+    local graph_pattern="${dataflow_name%.yml}"
+    DORA_GRAPH_NAME=$(dora list 2>/dev/null | grep -oP "${graph_pattern}[^\s]*" | head -1) || true
 
     cd "$PROJECT_ROOT"
 }
@@ -634,8 +646,10 @@ print_usage() {
     echo "  CONDA_ENV           Conda environment name (default: dorobot)"
     echo "  REPO_ID             Dataset repository ID (default: so101-test)"
     echo "  SINGLE_TASK         Task description (default: 'start and test so101 arm.')"
-    echo "  NPU             Ascend NPU support (default: 1, set to 0 to disable)"
-    echo "  CLOUD       Offload mode (default: 2):"
+    echo "  NPU                 Ascend NPU support (default: 1, set to 0 to disable)"
+    echo "  ZENOH_LEADER_ENDPOINT  Zenoh endpoint for remote leader (enables distributed mode)"
+    echo "                         Example: tcp://10.0.0.102:7447"
+    echo "  CLOUD               Offload mode (default: 2):"
     echo "                        0 = Local only (encode videos locally, no upload)"
     echo "                        1 = Cloud raw (upload raw images to cloud for encoding)"
     echo "                        2 = Edge mode (rsync to edge server, fastest for LAN)"
@@ -692,6 +706,9 @@ print_usage() {
     echo ""
     echo "  # Disable NPU (for non-Ascend hardware):"
     echo "  NPU=0 $0"
+    echo ""
+    echo "  # Distributed mode (leader arm on remote PC via Zenoh):"
+    echo "  ZENOH_LEADER_ENDPOINT=tcp://10.0.0.102:7447 $0"
     echo ""
     echo "  # With longer init delay (if timeout issues):"
     echo "  DORA_INIT_DELAY=10 $0"
