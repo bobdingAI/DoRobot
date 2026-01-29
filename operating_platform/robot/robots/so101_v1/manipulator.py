@@ -109,7 +109,8 @@ class ZenohLeaderSubscriber:
             return False
 
     def _on_leader_joint(self, sample):
-        """Callback when leader joint data is received."""
+        """Callback when leader joint data is received - forwards immediately to follower."""
+        global socket_joint, _zmq_initialized
         try:
             data = sample.payload.to_bytes()
             if len(data) != JOINT_MSG_SIZE:
@@ -127,6 +128,18 @@ class ZenohLeaderSubscriber:
             self._last_timestamp = timestamp_ns
             self._last_sequence = sequence
             self._last_heartbeat_time = time.time()
+
+            # CRITICAL: Forward to follower arm immediately via ZeroMQ
+            # This ensures real-time teleoperation without waiting for teleop_step()
+            if _zmq_initialized and socket_joint is not None:
+                try:
+                    buffer_bytes = self._last_positions.tobytes()
+                    socket_joint.send_multipart([
+                        b"action_joint_main_leader",
+                        buffer_bytes
+                    ], flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    pass  # Socket busy, skip this frame
 
             # Calculate and log latency periodically
             if sequence % 300 == 0:  # Every 10 seconds at 30Hz
@@ -724,6 +737,7 @@ class SO101Manipulator:
         leader_joint = {}
         if self.use_zenoh_leader and _zenoh_subscriber is not None:
             # Get leader positions from Zenoh (distributed mode)
+            # Note: Forwarding to follower is done immediately in _on_leader_joint callback
             zenoh_positions = _zenoh_subscriber.get_leader_positions()
             if zenoh_positions is not None:
                 now = time.perf_counter()
@@ -731,11 +745,6 @@ class SO101Manipulator:
                     # Use the Zenoh positions directly (already normalized)
                     leader_joint[name] = np.round(zenoh_positions.copy(), 3)
                     self.logs[f"read_leader_{name}_joint_dt_s"] = time.perf_counter() - now
-
-                # CRITICAL: In distributed mode, we must forward leader positions to follower arm
-                # In local mode, DORA handles this directly (leader/joint → follower/action_joint)
-                # In distributed mode, we need to send via ZeroMQ
-                so101_zmq_send("action_joint_main_leader", zenoh_positions, wait_time_s=0.001)
         else:
             # Original local mode: read from ZeroMQ
             for name in self.leader_arms:
