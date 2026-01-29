@@ -721,6 +721,11 @@ class SO101Manipulator:
                     # Use the Zenoh positions directly (already normalized)
                     leader_joint[name] = np.round(zenoh_positions.copy(), 3)
                     self.logs[f"read_leader_{name}_joint_dt_s"] = time.perf_counter() - now
+
+                # CRITICAL: In distributed mode, we must forward leader positions to follower arm
+                # In local mode, DORA handles this directly (leader/joint → follower/action_joint)
+                # In distributed mode, we need to send via ZeroMQ
+                so101_zmq_send("action_joint_main_leader", zenoh_positions, wait_time_s=0.001)
         else:
             # Original local mode: read from ZeroMQ
             for name in self.leader_arms:
