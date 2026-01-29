@@ -75,17 +75,22 @@ class ZenohLeaderSubscriber:
             return False
 
         try:
+            # Normalize endpoint format: convert tcp://host:port to tcp/host:port
+            endpoint = self.endpoint
+            if "://" in endpoint:
+                endpoint = endpoint.replace("://", "/")
+
             # Configure Zenoh
             zenoh_config = zenoh.Config()
             zenoh_config.insert_json5(
                 "connect/endpoints",
-                json.dumps([self.endpoint])
+                json.dumps([endpoint])
             )
             # Enable multicast scouting for peer discovery
             zenoh_config.insert_json5("scouting/multicast/enabled", "true")
 
             # Open session
-            print(f"[Zenoh] Connecting to leader at {self.endpoint}...")
+            print(f"[Zenoh] Connecting to leader at {endpoint}...")
             self._session = zenoh.open(zenoh_config)
 
             # Subscribe to leader joint state
