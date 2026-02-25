@@ -4,6 +4,50 @@ This document tracks all changes made to the DoRobot data collection system.
 
 ---
 
+## v0.2.142 (2026-02-25) - Security: Remove Hardcoded Credentials
+
+### Summary
+Critical security fix to remove all hardcoded secrets from the codebase and git history.
+
+### Security Fixes
+- **CRITICAL**: Removed hardcoded GPUFree JWT bearer token from all files
+- **CRITICAL**: Removed hardcoded passwords ("DongSheng2025#", "userb1234")
+- **CRITICAL**: Removed hardcoded usernames and infrastructure paths
+- **MEDIUM**: SSH passwords no longer printed in logs (hidden with asterisks)
+
+### Breaking Changes
+- All credentials must now be set via environment variables
+- Scripts will fail if required environment variables are not set
+
+### Required Environment Variables
+```bash
+# Required for cloud training
+export GPUFREE_BEARER_TOKEN="your-token"
+export DOROBOT_USERNAME="your-username"
+export DOROBOT_PASSWORD="your-password"
+
+# Optional
+export DOROBOT_API_URL="http://127.0.0.1:8000"
+export EDGE_SERVER_HOST="your-server-ip"
+export EDGE_SERVER_USER="your-ssh-user"
+export EDGE_SERVER_PASSWORD="your-ssh-password"
+```
+
+### Files Modified
+- `train.py` - Use environment variables for all credentials
+- `list_gpufree.py` - Use env var for token, hide passwords in logs
+- `operating_platform/core/cloud_train.py` - Use env vars
+- `scripts/cloud_train.py` - Remove default password fallbacks
+
+### Files Added
+- `.env.example` - Template for environment variable configuration
+
+### Git History
+- All previous commits containing secrets have been rewritten
+- Remote force push required after this update
+
+---
+
 ## v0.2.141 (2026-01-28) - Distributed Teleoperation via Zenoh
 
 ### Summary
