@@ -13,7 +13,7 @@ Options:
     --output PATH       Path to save trained model (default: ~/DoRobot/model)
     --api-url URL       API server URL (default: from env DOROBOT_API_URL or http://127.0.0.1:8000)
     --username USER     API username (default: from env DOROBOT_USERNAME or userb)
-    --password PASS     API password (default: from env DOROBOT_PASSWORD or REDACTED_PASSWORD)
+    --password PASS     API password (required - set via DOROBOT_PASSWORD env var)
     --timeout MINUTES   Training timeout in minutes (default: 120)
     --list              List available datasets and exit
     --download-only     Skip upload, just download model from existing training
