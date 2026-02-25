@@ -28,23 +28,23 @@ except ImportError:
     GPUFREE_AVAILABLE = False
     print("Warning: GPUFreeClient not available, cloud instance control disabled")
 
-# Default GPUFree bearer token
-DEFAULT_GPUFREE_BEARER_TOKEN = "REDACTED_GPUFREE_TOKEN"
+# GPUFree bearer token (required - set via environment variable)
+DEFAULT_GPUFREE_BEARER_TOKEN = os.environ.get("GPUFREE_BEARER_TOKEN", "")
 
-# Configuration (can be overridden by CLI args)
-API_BASE_URL = "http://127.0.0.1:8000"
-USERNAME = "gpu10"  # Change this to your username
-PASSWORD = "REDACTED_PASSWORD"  # Change this to your password
-DEFAULT_LOCAL_DATA_PATH = "/Users/nupylot/Public/haidian-data-10/gpu10/so101-test"  # Default local data folder path
-DEFAULT_LOCAL_MODEL_OUTPUT = "/Users/nupylot/Public/aimee-6283-out"  # Default local model download path
+# Configuration (can be overridden by CLI args or environment variables)
+API_BASE_URL = os.environ.get("DOROBOT_API_URL", "http://127.0.0.1:8000")
+USERNAME = os.environ.get("DOROBOT_USERNAME", "")
+PASSWORD = os.environ.get("DOROBOT_PASSWORD", "")
+DEFAULT_LOCAL_DATA_PATH = os.environ.get("DOROBOT_DATA_PATH", "")
+DEFAULT_LOCAL_MODEL_OUTPUT = os.environ.get("DOROBOT_MODEL_OUTPUT", "")
 
 # Edge server configuration (for CLOUD=2 mode)
 # These settings are used when uploading from DoRobot client to local edge server
-EDGE_SERVER_HOST = "192.168.1.100"  # Edge server IP address
-EDGE_SERVER_USER = "dorobot"  # SSH username for edge server
-EDGE_SERVER_PASSWORD = "REDACTED_PASSWORD"  # SSH password for edge server
-EDGE_SERVER_PORT = 22  # SSH port
-EDGE_SERVER_PATH = "/data/dorobot/uploads"  # Remote path for dataset uploads
+EDGE_SERVER_HOST = os.environ.get("EDGE_SERVER_HOST", "")
+EDGE_SERVER_USER = os.environ.get("EDGE_SERVER_USER", "")
+EDGE_SERVER_PASSWORD = os.environ.get("EDGE_SERVER_PASSWORD", "")
+EDGE_SERVER_PORT = int(os.environ.get("EDGE_SERVER_PORT", "22"))
+EDGE_SERVER_PATH = os.environ.get("EDGE_SERVER_PATH", "")
 
 def log(message):
     """Print timestamped log messages"""

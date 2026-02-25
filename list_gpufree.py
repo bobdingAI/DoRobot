@@ -13,6 +13,7 @@ Status Codes:
 - 5: Stopped (off)
 """
 
+import os
 import requests
 import json
 import subprocess
@@ -23,7 +24,7 @@ from typing import Optional, Dict, List, Tuple
 
 # API Configuration
 BASE_URL = "https://www.gpufree.cn/api/v1"
-BEARER_TOKEN = "REDACTED_GPUFREE_TOKEN"
+BEARER_TOKEN = os.environ.get("GPUFREE_BEARER_TOKEN", "")
 
 # Status constants
 STATUS_RUNNING = 3  # Instance is running (on)
@@ -265,7 +266,7 @@ class GPUFreeClient:
                 print(f"Instance UUID: {instance_uuid}")
                 print(f"Instance ID:   {instance_id}")
                 print(f"SSH Command:   {ssh_command}")
-                print(f"SSH Password:  {ssh_password}")
+                print(f"SSH Password:  {'*' * 8} (hidden)")
                 print(f"Start Time:    {start_request_time}")
                 print(f"SSH Ready:     {success_time}")
                 print(f"Total Elapsed: {elapsed:.2f} seconds")
@@ -335,7 +336,7 @@ def print_instance_info(instance: Dict) -> None:
     print(f"Status:        {status} ({status_str})")
     print(f"Charge Type:   {instance.get('charge_type')}")
     print(f"SSH Command:   {instance.get('ssh_command')}")
-    print(f"SSH Password:  {instance.get('ssh_password')}")
+    print(f"SSH Password:  {'*' * 8} (hidden)")
     print(f"Jupyter URL:   {instance.get('jupyter_url')}")
 
     open_apis = instance.get('open_apis', [])

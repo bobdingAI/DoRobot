@@ -29,13 +29,13 @@ try:
 except ImportError:
     GPUFREE_AVAILABLE = False
 
-# Default GPUFree bearer token
-DEFAULT_GPUFREE_BEARER_TOKEN = "REDACTED_GPUFREE_TOKEN"
+# GPUFree bearer token (required - set via environment variable)
+DEFAULT_GPUFREE_BEARER_TOKEN = os.environ.get("GPUFREE_BEARER_TOKEN", "")
 
-# Default API configuration - can be overridden via environment variables
+# Default API configuration - must be set via environment variables
 DEFAULT_API_BASE_URL = os.environ.get("DOROBOT_API_URL", "http://127.0.0.1:8000")
-DEFAULT_USERNAME = os.environ.get("DOROBOT_USERNAME", "userb")
-DEFAULT_PASSWORD = os.environ.get("DOROBOT_PASSWORD", "REDACTED_PASSWORD")
+DEFAULT_USERNAME = os.environ.get("DOROBOT_USERNAME", "")
+DEFAULT_PASSWORD = os.environ.get("DOROBOT_PASSWORD", "")
 
 
 def log(message):

@@ -190,14 +190,14 @@ def main():
     parser.add_argument(
         "--username", "-u",
         type=str,
-        default=os.environ.get("DOROBOT_USERNAME", "userb"),
-        help="API username"
+        default=os.environ.get("DOROBOT_USERNAME", ""),
+        help="API username (required - set via DOROBOT_USERNAME env var or --username)"
     )
     parser.add_argument(
         "--password", "-p",
         type=str,
-        default=os.environ.get("DOROBOT_PASSWORD", "REDACTED_PASSWORD"),
-        help="API password"
+        default=os.environ.get("DOROBOT_PASSWORD", ""),
+        help="API password (required - set via DOROBOT_PASSWORD env var or --password)"
     )
     parser.add_argument(
         "--timeout", "-t",
